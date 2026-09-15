@@ -1,4 +1,8 @@
-<h1 align="center">🐹 Хомка</h1>
+<p align="center">
+  <img src="docs/assets/homka.png" alt="Хомка" width="160" height="160">
+</p>
+
+<h1 align="center">Хомка</h1>
 
 <p align="center">
   <strong>Семейная помощница в Telegram, которая, как хомяк, прячет за щёки всё важное: людей, договорённости, дела, списки и файлы — и не путает личное с семейным.</strong>
