@@ -1,0 +1,27 @@
+node_modules
+.env*
+!.env.example
+.eve
+.vercel
+.workflow-data
+.output
+.runtime
+.nitro
+coverage
+dist
+*.tsbuildinfo
+*.log
+client_secret_*.json
+__pycache__/
+*.py[cod]
+
+# Материалы курса из экспорта Telegram (не часть проекта)
+course/
+result-chat.json
+
+# Local desktop metadata and private deployment audit notes
+.DS_Store
+docs/family-launch-review.ru.md
+docs/family-product-audit.ru.md
+docs/family-scenarios-check.ru.md
+docs/yandex-cloud-launch.ru.md

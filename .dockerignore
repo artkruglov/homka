@@ -1,0 +1,10 @@
+node_modules
+.git
+.env*
+!.env.example
+.eve
+.workflow-data
+.output
+.runtime
+coverage
+*.log

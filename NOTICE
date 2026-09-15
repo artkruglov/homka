@@ -1,0 +1,30 @@
+Homka (Хомка)
+Copyright 2026 the Homka and Osinara authors: nyxandro, ilkruglov, artkruglov and contributors.
+
+Homka started as Osinara (https://github.com/nyxandro/osinara) by nyxandro and was developed further
+by ilkruglov and artkruglov. It is distributed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes modified portions of third-party software:
+
+* eve (https://github.com/vercel/eve), Copyright 2026 Vercel, Inc. and contributors, Apache-2.0.
+  The installed eve 0.40.0 package is patched after `npm ci` by scripts/apply-eve-patches.ts,
+  scripts/eve-patches/ and scripts/eve-runtime/. Those files contain modified excerpts of eve's
+  distributed JavaScript and were changed by the Homka authors.
+  "This product includes software developed at Vercel, Inc. (https://vercel.com/)."
+
+* @workflow/world-postgres (https://github.com/vercel/workflow), Copyright Vercel, Inc. and
+  contributors, Apache-2.0. scripts/eve-patches/stream-recovery.ts contains modified excerpts of
+  version 5.0.0-beta.35, changed by the Homka authors.
+
+* agent-browser skill (https://github.com/vercel-labs/agent-browser), Apache-2.0.
+  agent/skills/agent-browser/ is adapted from the upstream skill and changed by the Homka authors.
+
+* GigaAM (https://github.com/salute-developers/GigaAM), Copyright 2024 GigaChat Team, MIT.
+  infra/gigaam/ builds a speech-recognition service around the GigaAM model.
+
+Container images built from this repository bundle further third-party programs under their own
+licenses, among them Lightpanda (AGPL-3.0, source: https://github.com/lightpanda-io/browser),
+Chrome for Testing (Chromium license and Google terms), agent-browser (Apache-2.0), PostgreSQL with
+pgvector, Hugging Face text-embeddings-inference (Apache-2.0) and Debian packages. Whoever
+distributes such images is responsible for those programs' license terms, including offering the
+Lightpanda source.

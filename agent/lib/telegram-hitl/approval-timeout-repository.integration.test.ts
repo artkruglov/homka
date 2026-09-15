@@ -1,0 +1,469 @@
+/**
+ * Expired approval repository integration tests.
+ *
+ * Constructs covered:
+ * - `claimExpired`: leases only prompts older than the confirmation window, once per lease.
+ * - `completeTimeout`: terminalizes the row and releases the session's rotation veto.
+ * - A concurrent user decision wins the row; a failed cancellation stays retryable.
+ * - Framework `session-limit` prompts are out of the confirmation window's scope.
+ * - Pre-migration rows without a request kind are fail-closed.
+ * - A prompt whose session no longer owns the parked Eve run is never settled.
+ * - A claim carries revalidated Telegram auth, and a timed-out row is not execution evidence.
+ * - Одна заблокированная область не голодит остальную развёртку: пропущенная строка не получает
+ *   лизу и не увеличивает счётчик попыток, поэтому снова оказывается первой в очереди.
+ */
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+  TELEGRAM_HITL_TIMEOUT_SWEEP_BATCH_SIZE,
+} from "../../config.js";
+import { closeDatabase, database } from "../database.js";
+import { sessionRepository } from "../sessions/session-repository.js";
+import { telegramHitlApprovalRepository } from "./approval-repository.js";
+import { approvalTimeoutRepository } from "./approval-timeout-repository.js";
+
+const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
+const url = process.env.DATABASE_URL;
+if (enabled && (!url || !new URL(url).pathname.endsWith("_test"))) {
+  throw new Error("AGENT_TEST_DATABASE_UNSAFE: Для integration-тестов нужна отдельная БД *_test");
+}
+const describeWithDatabase = enabled ? describe : describe.skip;
+const OWNER_TELEGRAM_ID = "timeout-owner";
+const NOW = new Date("2026-08-24T12:00:00.000Z");
+
+async function fixture(
+  kind: "question" | "session-limit" | "tool-approval" = "tool-approval",
+  scoped = false,
+): Promise<{ sessionId: string; spaceId?: string }> {
+  const family = await database().query<{ id: string }>(
+    "INSERT INTO families (name) VALUES ('Timeout') RETURNING id",
+  );
+  const owner = await database().query<{ id: string }>(
+    `INSERT INTO users (telegram_user_id, display_name)
+     VALUES ($1, 'Владелец') RETURNING id`,
+    [OWNER_TELEGRAM_ID],
+  );
+  await database().query(
+    "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'owner')",
+    [family.rows[0]!.id, owner.rows[0]!.id],
+  );
+  let spaceId: string | undefined;
+  if (scoped) {
+    spaceId = (await database().query("INSERT INTO spaces(family_id,kind,title,owner_user_id) VALUES($1,'personal','Personal',$2) RETURNING id", [family.rows[0]!.id,owner.rows[0]!.id])).rows[0].id;
+    await database().query("INSERT INTO space_memberships(family_id,space_id,user_id,role,state) VALUES($1,$2,$3,'manager','active')", [family.rows[0]!.id,spaceId,owner.rows[0]!.id]);
+    await database().query("UPDATE spaces SET state='active' WHERE id=$1", [spaceId]);
+  }
+  const session = await sessionRepository.prepareTurn({
+    ...(spaceId ? { spaceContext: { familyId: family.rows[0]!.id, userId: owner.rows[0]!.id, spaceId, chat: { type: "private" as const } } } : {}),
+    baseContinuationToken: "700::",
+    familyId: family.rows[0]!.id,
+    groupId: null,
+    kind: "canonical",
+    now: NOW,
+    scope: "personal",
+    telegramForumTopicId: null,
+    userId: owner.rows[0]!.id,
+  });
+  await sessionRepository.bindEveSession(session.id, "wrun_timeout");
+  await sessionRepository.parkSession({
+    applicationSessionId: session.id,
+    pendingRequestId: "aitxt-timeout-1",
+    requesterTelegramUserId: OWNER_TELEGRAM_ID,
+    requesterUserId: owner.rows[0]!.id,
+  });
+  await sessionRepository.registerRouteAlias(session.id, "700::2801");
+  await registerApproval(session.id, kind);
+  return { sessionId: session.id, spaceId };
+}
+
+async function registerApproval(
+  sessionId: string,
+  kind: "question" | "session-limit" | "tool-approval",
+): Promise<void> {
+  await telegramHitlApprovalRepository.register({
+    applicationSessionId: sessionId,
+    kind,
+    callbackData: ["eve:0", "eve:1"],
+    callbackOptions: [
+      { callbackData: "eve:0", label: "Да, подтвердить", optionId: "approve" },
+      { callbackData: "eve:1", label: "Cancel", optionId: "cancel" },
+    ],
+    eveSessionId: "wrun_timeout",
+    promptText: "Подтвердите действие: исправить запись в памяти.",
+    requestId: "aitxt-timeout-1",
+    telegramChatId: "700",
+    telegramChatType: "private",
+    telegramMessageId: "2801",
+    telegramMessageThreadId: null,
+    telegramUserId: OWNER_TELEGRAM_ID,
+    toolCallId: "call-timeout-1",
+    toolInputHash: "b".repeat(64),
+    toolName: "manage_memory",
+  });
+}
+
+async function ageApproval(milliseconds: number): Promise<void> {
+  await database().query(
+    "UPDATE telegram_hitl_approvals SET created_at = $1::timestamptz - ($2::bigint * interval '1 millisecond')",
+    [NOW, milliseconds],
+  );
+}
+
+async function pendingOperation(sessionId: string): Promise<boolean> {
+  const result = await database().query<{ pending_operation: boolean }>(
+    "SELECT pending_operation FROM conversation_sessions WHERE id = $1",
+    [sessionId],
+  );
+  return result.rows[0]!.pending_operation;
+}
+
+async function seedSpaceApprovals(input: {
+  familyId: string;
+  count: number;
+  ownerId: string;
+  prefix: string;
+  spaceId: string;
+}): Promise<string[]> {
+  const sessions: string[] = [];
+  for (let index = 0; index < input.count; index += 1) {
+    const session = await sessionRepository.prepareTurn({
+      baseContinuationToken: `${input.prefix}-${index}::`,
+      familyId: input.familyId,
+      groupId: null,
+      kind: "canonical",
+      now: NOW,
+      scope: "personal",
+      spaceContext: {
+        chat: { type: "private" },
+        familyId: input.familyId,
+        spaceId: input.spaceId,
+        userId: input.ownerId,
+      },
+      telegramForumTopicId: null,
+      userId: input.ownerId,
+    });
+    await sessionRepository.bindEveSession(session.id, `wrun-${input.prefix}-${index}`);
+    await sessionRepository.parkSession({
+      applicationSessionId: session.id,
+      pendingRequestId: `aitxt-${input.prefix}-${index}`,
+      requesterTelegramUserId: OWNER_TELEGRAM_ID,
+      requesterUserId: input.ownerId,
+    });
+    await telegramHitlApprovalRepository.register({
+      applicationSessionId: session.id,
+      kind: "tool-approval",
+      callbackData: ["eve:0"],
+      callbackOptions: [{ callbackData: "eve:0", label: "Да", optionId: "approve" }],
+      eveSessionId: `wrun-${input.prefix}-${index}`,
+      promptText: "Подтвердите действие.",
+      requestId: `aitxt-${input.prefix}-${index}`,
+      telegramChatId: "700",
+      telegramChatType: "private",
+      telegramMessageId: `${input.prefix === "free" ? 9 : 8}00${index}`,
+      telegramMessageThreadId: null,
+      telegramUserId: OWNER_TELEGRAM_ID,
+      toolCallId: `call-${input.prefix}-${index}`,
+      toolInputHash: "c".repeat(64),
+      toolName: "manage_memory",
+    });
+    sessions.push(session.id);
+  }
+  return sessions;
+}
+
+describeWithDatabase("approval timeout repository", () => {
+  beforeEach(async () => {
+    await database().query(
+      "TRUNCATE telegram_hitl_approvals, conversation_session_routes, conversation_sessions, family_memberships, users, families CASCADE",
+    );
+  });
+  afterAll(async () => closeDatabase());
+
+  it("does not let one locked audience starve the rest of the sweep", async () => {
+    const family = (await database().query<{ id: string }>(
+      "INSERT INTO families (name) VALUES ('Starvation') RETURNING id",
+    )).rows[0]!.id;
+    const ownerId = (await database().query<{ id: string }>(
+      "INSERT INTO users (telegram_user_id, display_name) VALUES ($1,'Владелец') RETURNING id",
+      [OWNER_TELEGRAM_ID],
+    )).rows[0]!.id;
+    await database().query(
+      "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1,$2,'owner')", [family, ownerId],
+    );
+    const makeSpace = async (title: string) => {
+      const id = (await database().query<{ id: string }>(
+        "INSERT INTO spaces(family_id,kind,title) VALUES($1,'shared',$2) RETURNING id", [family, title],
+      )).rows[0]!.id;
+      await database().query(
+        "INSERT INTO space_memberships(family_id,space_id,user_id,role,state) VALUES($1,$2,$3,'manager','active')",
+        [family, id, ownerId],
+      );
+      await database().query("UPDATE spaces SET state='active' WHERE id=$1", [id]);
+      return id;
+    };
+    const blocked = await makeSpace("Заблокированная");
+    const free = await makeSpace("Свободная");
+    // Заблокированная область заполняет собой всю партию: её строки старше.
+    await seedSpaceApprovals({ count: TELEGRAM_HITL_TIMEOUT_SWEEP_BATCH_SIZE, familyId: family, ownerId, prefix: "blocked", spaceId: blocked });
+    const [freeSession] = await seedSpaceApprovals({ count: 1, familyId: family, ownerId, prefix: "free", spaceId: free });
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+
+    const holder = await database().connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT id FROM spaces WHERE id=$1 FOR UPDATE", [blocked]);
+      const claims = await approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS);
+      expect(claims.map((claim) => claim.applicationSessionId)).toEqual([freeSession]);
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+    }
+  });
+
+  it("does not resume old model history through timeout after space revocation", async () => {
+    const current = await fixture("tool-approval", true);
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    await database().query("UPDATE space_memberships SET state='revoked' WHERE space_id=$1", [current.spaceId]);
+    // Ход возобновлять нельзя, но и висеть вечно запрос не должен: он выдаётся без личности,
+    // чтобы развёртка закрыла его терминально и переписала сообщение человеку.
+    const claims = await approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]!.auth).toBeNull();
+  });
+
+  it("keeps leasing an unprovable approver until it is settled", async () => {
+    const current = await fixture("tool-approval", true);
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    await database().query("UPDATE space_memberships SET state='revoked' WHERE space_id=$1", [current.spaceId]);
+    const claims = await approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS);
+    await expect(approvalTimeoutRepository.completeTimeout(claims[0]!, NOW)).resolves.toBe(true);
+    const settled = (await database().query<{ timed_out_at: Date | null; consumed_at: Date | null }>(
+      "SELECT timed_out_at,consumed_at FROM telegram_hitl_approvals WHERE application_session_id=$1",
+      [current.sessionId],
+    )).rows[0]!;
+    expect(settled.timed_out_at).not.toBeNull();
+    expect(settled.consumed_at).not.toBeNull();
+    expect((await database().query<{ pending_operation: boolean }>(
+      "SELECT pending_operation FROM conversation_sessions WHERE id=$1", [current.sessionId],
+    )).rows[0]!.pending_operation).toBe(false);
+  });
+
+  it("skips an audience being changed and retries it on a later sweep", async () => {
+    const current = await fixture("question", true);
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    const writer = await database().connect();
+    try {
+      await writer.query("BEGIN");
+      await writer.query("SELECT id FROM spaces WHERE id=$1 FOR UPDATE", [current.spaceId]);
+      await expect(approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS)).resolves.toEqual([]);
+    } finally {
+      await writer.query("ROLLBACK");
+      writer.release();
+    }
+    await expect(approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS)).resolves.toHaveLength(1);
+  });
+
+  it("carries the current space policy in timeout continuation auth", async () => {
+    const current = await fixture("question", true);
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    const policy = (await database().query("SELECT policy_version FROM spaces WHERE id=$1", [current.spaceId])).rows[0].policy_version;
+    const claims = await approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ auth: { attributes: { spaceId: current.spaceId, spacePolicyVersion: String(policy) } } });
+  });
+
+  it("never cancels a framework session-limit prompt", async () => {
+    await fixture("session-limit");
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toEqual([]);
+  });
+
+  it("bounds an unanswered agent question the same way as an approval", async () => {
+    await fixture("question");
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toHaveLength(1);
+  });
+
+  it("never cancels a pre-migration row with no request kind", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    await database().query("UPDATE telegram_hitl_approvals SET request_kind = NULL");
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toEqual([]);
+  });
+
+  it("never settles a prompt whose session moved to another Eve run", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    // A crashed run leaves the old prompt behind; settling it would clear the veto of the live one.
+    await database().query("UPDATE conversation_sessions SET eve_session_id = 'wrun_newer'");
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toEqual([]);
+  });
+
+  it("never settles a prompt of a retired session", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    await database().query("UPDATE conversation_sessions SET retired_at = now()");
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toEqual([]);
+  });
+
+  it("carries revalidated Telegram auth into the claim", async () => {
+    const current = await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+
+    const [claim] = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+
+    // Eve overwrites session auth with what the response delivers, so it must be the real context.
+    expect(claim!.auth!.authenticator).toBe("telegram");
+    expect(claim!.auth!.attributes).toMatchObject({
+      applicationSessionId: current.sessionId,
+      memoryScopes: ["personal", "family"],
+      telegramActorId: OWNER_TELEGRAM_ID,
+    });
+  });
+
+  it("does not accept a timed-out approval as tool execution evidence", async () => {
+    const current = await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    const [claim] = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+    await approvalTimeoutRepository.completeTimeout(claim!, NOW);
+
+    await expect(
+      telegramHitlApprovalRepository.requireToolExecutionApproval({
+        applicationSessionId: current.sessionId,
+        eveSessionId: "wrun_timeout",
+        telegramUserId: OWNER_TELEGRAM_ID,
+        toolCallId: "call-timeout-1",
+        toolInputHash: "b".repeat(64),
+        toolName: "manage_memory",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("re-opens a replayed request without violating the terminal timeout invariant", async () => {
+    const current = await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    const [claim] = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+    await approvalTimeoutRepository.completeTimeout(claim!, NOW);
+
+    // Eve may replay `input.requested`; the ON CONFLICT branch must clear the timeout state.
+    await expect(registerApproval(current.sessionId, "tool-approval")).resolves.toBeUndefined();
+    const row = await database().query<{ consumed_at: Date | null; timed_out_at: Date | null }>(
+      "SELECT consumed_at, timed_out_at FROM telegram_hitl_approvals",
+    );
+    expect(row.rows[0]!.consumed_at).toBeNull();
+    expect(row.rows[0]!.timed_out_at).toBeNull();
+  });
+
+  it("leaves a prompt inside the confirmation window untouched", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS - 1_000);
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toEqual([]);
+  });
+
+  it("leases an expired prompt exactly once until the lease elapses", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+
+    const claimed = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]).toMatchObject({
+      eveSessionId: "wrun_timeout",
+      promptText: "Подтвердите действие: исправить запись в памяти.",
+      requestId: "aitxt-timeout-1",
+      telegramChatId: "700",
+      telegramMessageId: "2801",
+      toolName: "manage_memory",
+    });
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toEqual([]);
+  });
+
+  it("terminalizes the approval and releases the rotation veto", async () => {
+    const current = await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    expect(await pendingOperation(current.sessionId)).toBe(true);
+
+    const [claim] = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+
+    await expect(approvalTimeoutRepository.completeTimeout(claim!, NOW)).resolves.toBe(true);
+    expect(await pendingOperation(current.sessionId)).toBe(false);
+
+    const row = await database().query<{ consumed_at: Date; timed_out_at: Date }>(
+      "SELECT consumed_at, timed_out_at FROM telegram_hitl_approvals",
+    );
+    expect(row.rows[0]!.consumed_at).not.toBeNull();
+    expect(row.rows[0]!.timed_out_at).not.toBeNull();
+  });
+
+  it("yields the row to a user decision that lands during the sweep", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    const [claim] = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+
+    await expect(
+      telegramHitlApprovalRepository.claimCallback({
+        baseContinuationToken: "700::2801",
+        callbackData: "eve:0",
+        telegramChatId: "700",
+        telegramMessageId: "2801",
+        telegramUserId: OWNER_TELEGRAM_ID,
+      }),
+    ).resolves.toMatchObject({ status: "authorized" });
+
+    await expect(approvalTimeoutRepository.completeTimeout(claim!, NOW)).resolves.toBe(false);
+  });
+
+  it("keeps a failed cancellation retryable on the next sweep", async () => {
+    await fixture();
+    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
+    const [claim] = await approvalTimeoutRepository.claimExpired(
+      NOW,
+      TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
+    );
+
+    await approvalTimeoutRepository.failTimeout(claim!, "AGENT_APPROVAL_TIMEOUT_RESPONSE_FAILED");
+
+    await expect(
+      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
+    ).resolves.toHaveLength(1);
+  });
+});

@@ -1,0 +1,5 @@
+{
+  "name": "osinara-workflow-postgres-stress",
+  "private": true,
+  "type": "module"
+}

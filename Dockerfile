@@ -1,0 +1,196 @@
+ARG OCI_SOURCE
+ARG OCI_VERSION
+ARG OCI_REVISION
+
+FROM node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5 AS first-party-node
+ARG OCI_SOURCE
+ARG OCI_VERSION
+ARG OCI_REVISION
+LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.version="${OCI_VERSION}" \
+      org.opencontainers.image.revision="${OCI_REVISION}"
+
+FROM first-party-node AS dependencies
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
+COPY scripts/eve-patches ./scripts/eve-patches
+COPY scripts/eve-runtime ./scripts/eve-runtime
+COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
+RUN npm ci --ignore-scripts \
+    && npm run postinstall \
+    && npm run install:gws
+
+FROM dependencies AS build
+COPY . .
+RUN npm run typecheck && npm run build && npm run build:runtime
+
+# Release-only artifact stage: output is one SEA executable, never a deployable container image.
+FROM build AS installer-cli-build
+ARG INSTALLATION_ARCHIVE_SHA256
+ARG INSTALLATION_RELEASE_VERSION
+RUN bash scripts/provider-installer/build-provider-installer-cli.sh \
+    /tmp/osinara-linux-x64 "$INSTALLATION_RELEASE_VERSION" "$INSTALLATION_ARCHIVE_SHA256"
+
+FROM scratch AS installer-cli-artifact
+COPY --from=installer-cli-build /tmp/osinara-linux-x64 /osinara-linux-x64
+
+FROM dependencies AS test
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes jq \
+    && rm -rf /var/lib/apt/lists/*
+COPY stress/telegram-conversation/package.json stress/telegram-conversation/package-lock.json ./stress/telegram-conversation/
+RUN npm ci --ignore-scripts --prefix stress/telegram-conversation
+COPY . .
+CMD ["npm", "test"]
+
+# Runtime images install only production packages; build tooling and TypeScript stay behind.
+FROM first-party-node AS production-dependencies
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
+COPY scripts/eve-patches ./scripts/eve-patches
+COPY scripts/eve-runtime ./scripts/eve-runtime
+COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm run postinstall \
+    && npm run install:gws
+
+# Codex subscription gateway stays digest-pinned and exposes no management surface.
+FROM eceasy/cli-proxy-api@sha256:591a09c19de769be09a2e56277365cd568b83fc7d98c94d2e7e7bef7069f7422 AS cli-proxy
+ARG OCI_SOURCE
+ARG OCI_VERSION
+ARG OCI_REVISION
+LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.version="${OCI_VERSION}" \
+      org.opencontainers.image.revision="${OCI_REVISION}"
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes curl jq \
+    && groupadd --gid 10001 cli-proxy \
+    && useradd --gid cli-proxy --no-create-home --uid 10001 --shell /usr/sbin/nologin cli-proxy \
+    && install -d -o cli-proxy -g cli-proxy -m 0700 /run/cli-proxy-api /var/lib/cli-proxy-api/auth \
+    && rm -rf /var/lib/apt/lists/*
+COPY --chown=root:root infra/cli-proxy-entrypoint.sh /usr/local/bin/osinara-cli-proxy-entrypoint
+RUN chmod 0555 /usr/local/bin/osinara-cli-proxy-entrypoint
+USER cli-proxy
+ENTRYPOINT ["osinara-cli-proxy-entrypoint", "/var/lib/cli-proxy-api/auth", "/run/cli-proxy-api/config.json"]
+CMD ["/CLIProxyAPI/CLIProxyAPI", "-config", "/run/cli-proxy-api/config.json"]
+
+# Official amd64 image, Lightpanda 1.0.0-nightly.9289+6efc35cfe. Content-addressed
+# source survives upstream's replacement of the nightly release download.
+FROM lightpanda/browser@sha256:b252ce8cfa730946b91b5d05594bf7977fe234d11caf7dd3be0dce4a3e600cee AS lightpanda-source
+
+FROM first-party-node AS sandbox-runtime
+COPY --from=lightpanda-source /bin/lightpanda /usr/local/bin/lightpanda
+COPY infra/certificates/russian-trusted-root-ca.crt /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+      build-essential \
+      ca-certificates \
+      curl \
+      fonts-liberation \
+      findutils \
+      grep \
+      git \
+      jq \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libcups2 \
+      libdbus-1-3 \
+      libdrm2 \
+      libgbm1 \
+      libglib2.0-0 \
+      libgtk-3-0 \
+      libnspr4 \
+      libnss3 \
+      libpango-1.0-0 \
+      libx11-xcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxfixes3 \
+      libxkbcommon0 \
+      libxrandr2 \
+      poppler-utils \
+      python3 \
+      python3-pip \
+      python3-venv \
+      ripgrep \
+      unzip \
+      xdg-utils \
+      zip \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# The browser stack ships in the image: the skill used to make the model install agent-browser
+# and download Chrome (480 MB) into every tools workspace in the middle of a turn, one copy per
+# family member and a version drift between them. Chrome for Testing matches the agent-browser
+# release; Lightpanda is the light engine for reading (`--engine lightpanda`, no screenshots).
+# agent-browser 0.36 launches Lightpanda with `--experimental-features`, which the tagged 0.4.0
+# rejects, so a compatible nightly is copied from the immutable source image above.
+ARG AGENT_BROWSER_VERSION=0.36.0
+ARG CHROME_FOR_TESTING_VERSION=152.0.7977.82
+RUN npm install --global --no-fund --no-audit "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && curl -fsSL -o /tmp/chrome-linux64.zip \
+      "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_FOR_TESTING_VERSION}/linux64/chrome-linux64.zip" \
+    && printf '%s  %s\n' 0704631fb3e4f741092e08f55272f90abc3e307f991f05f332924364415b02e0 /tmp/chrome-linux64.zip | sha256sum --check - \
+    && mkdir -p /opt/chrome \
+    && unzip -q /tmp/chrome-linux64.zip -d /opt/chrome \
+    && rm -f /tmp/chrome-linux64.zip \
+    && chmod 0755 /usr/local/bin/lightpanda \
+    && /usr/local/bin/lightpanda version \
+    && ln -s /opt/chrome/chrome-linux64/chrome /usr/bin/google-chrome \
+    && /opt/chrome/chrome-linux64/chrome --version \
+    && agent-browser --version
+# No AGENT_BROWSER_EXECUTABLE_PATH: agent-browser applies it to every engine, so Lightpanda would
+# launch Chrome. The system symlink is where agent-browser looks for Chrome on its own.
+COPY --from=production-dependencies \
+  /app/node_modules/@googleworkspace/cli/bin/gws \
+  /opt/osinara/gws
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
+
+FROM first-party-node AS sandbox-runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=build /app/.runtime/services/sandbox-runner/main.js ./.runtime/services/sandbox-runner/main.js
+CMD ["node", ".runtime/services/sandbox-runner/main.js"]
+
+FROM first-party-node AS sandbox-egress-proxy
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=build /app/.runtime/services/sandbox-egress-proxy/main.js ./.runtime/services/sandbox-egress-proxy/main.js
+USER node
+CMD ["node", ".runtime/services/sandbox-egress-proxy/main.js"]
+
+FROM first-party-node AS runtime
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=production-dependencies /app/node_modules ./node_modules
+COPY --from=build /app/.output ./.output
+COPY --from=build /app/.eve ./.eve
+COPY --from=build /app/.runtime ./.runtime
+# Eve `start` serves `.output` but still resolves authored modules from this tree.
+COPY --from=build /app/agent ./agent
+COPY --from=build /app/config ./config
+COPY --from=build /app/migrations ./migrations
+COPY --from=build /app/package.json ./package.json
+COPY scripts/docker-entrypoint.sh /usr/local/bin/osinara-entrypoint
+RUN chmod +x /usr/local/bin/osinara-entrypoint
+EXPOSE 3000
+ENTRYPOINT ["osinara-entrypoint"]
+
+FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de AS edge
+ARG OCI_SOURCE
+ARG OCI_VERSION
+ARG OCI_REVISION
+LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.version="${OCI_VERSION}" \
+      org.opencontainers.image.revision="${OCI_REVISION}"
+COPY infra/nginx.conf /etc/nginx/nginx.conf
+EXPOSE 80

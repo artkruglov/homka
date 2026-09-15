@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Docker Compose test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Run production-equivalent checks
+        run: docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
+
+  images:
+    name: Build first-party images
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Build every image target without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in runtime sandbox-runtime sandbox-runner sandbox-egress-proxy edge; do
+            docker build --platform linux/amd64 --target "$target" \
+              --build-arg "OCI_SOURCE=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              --build-arg "OCI_REVISION=${GITHUB_SHA}" \
+              --tag "osinara-${target}:ci" .
+          done

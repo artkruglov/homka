@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 4,
+  "provider": "deepseek",
+  "agent": {
+    "transport": {
+      "protocol": "anthropic-messages",
+      "baseUrl": "https://api.deepseek.com/anthropic",
+      "authentication": "api-key",
+      "reasoning": {
+        "type": "enabled",
+        "mode": "adaptive"
+      }
+    },
+    "models": {
+      "primary": {
+        "id": "deepseek-v4-flash",
+        "contextWindowTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "vision": {
+        "supportsImageInput": false
+      }
+    }
+  },
+  "voice": {
+    "enabled": true,
+    "transcriptionModelId": "whisper-large-v3-turbo"
+  }
+}

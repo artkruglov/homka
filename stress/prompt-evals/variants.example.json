@@ -1,0 +1,4 @@
+[
+  { "key": "A", "label": "prod prompt", "mode": "external" },
+  { "key": "B", "label": "prod + section", "mode": "external", "appendSection": "## Как ты живёшь в группе\n\nДлина: одно предложение, максимум два." }
+]

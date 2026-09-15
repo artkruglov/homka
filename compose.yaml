@@ -1,0 +1,263 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: osinara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: osinara
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osinara -d osinara"]
+      interval: 15s
+      timeout: 3s
+      retries: 7
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  cli-proxy-api:
+    profiles: ["codex-subscription"]
+    build:
+      context: .
+      target: cli-proxy
+    environment:
+      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error --header \"Authorization: Bearer $${CLI_PROXY_API_KEY}\" http://127.0.0.1:8317/v1/models >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - default
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /run/cli-proxy-api:size=16m,mode=0700,uid=10001,gid=10001
+    volumes:
+      - cli-proxy-auth:/var/lib/cli-proxy-api/auth
+
+  agent:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      memory-embedding:
+        condition: service_healthy
+      sandbox-runner:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID-}
+      CLOUDFLARE_AI_TOKEN: ${CLOUDFLARE_AI_TOKEN-}
+      GROCERY_MCP_URL: ${GROCERY_MCP_URL-}
+      GROQ_API_KEY: ${GROQ_API_KEY-}
+      GIGAAM_API_KEY: ${GIGAAM_API_KEY-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
+      NEURALDEEP_IMAGE_API_KEY: ${NEURALDEEP_IMAGE_API_KEY-}
+      OPENROUTER_IMAGE_API_KEY: ${OPENROUTER_IMAGE_API_KEY-}
+      OPENROUTER_IMAGE_MODEL: ${OPENROUTER_IMAGE_MODEL-}
+      OPENROUTER_VIDEO_API_KEY: ${OPENROUTER_VIDEO_API_KEY-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
+      INTEGRATION_TOKEN_ENCRYPTION_KEY: ${INTEGRATION_TOKEN_ENCRYPTION_KEY-}
+      INVITATION_SIGNING_SECRET: ${INVITATION_SIGNING_SECRET:?INVITATION_SIGNING_SECRET is required}
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+      MODEL_API_KEY: ${MODEL_API_KEY:?MODEL_API_KEY is required}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?TELEGRAM_BOT_USERNAME is required}
+      TELEGRAM_AGENT_NAME: ${TELEGRAM_AGENT_NAME-}
+      # A source build has no deploy controller: release proposals from another repository cannot be installed.
+      OSINARA_SOFTWARE_UPDATES: ${OSINARA_SOFTWARE_UPDATES:-manual}
+      TELEGRAM_AGENT_ALIASES: ${TELEGRAM_AGENT_ALIASES-}
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
+      WORKFLOW_POSTGRES_JOB_PREFIX: osinara
+      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "12"
+      WORKFLOW_POSTGRES_URL: ${WORKFLOW_POSTGRES_URL:?WORKFLOW_POSTGRES_URL is required}
+      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "10"
+      WORKFLOW_QUEUE_NAMESPACE: eve6f73696e6172612d66616d696c792d6167656e74
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/eve/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks:
+      - default
+      - sandbox-control
+    volumes:
+      - ./config/agent-model-providers.json:/app/config/agent-model-providers.json:ro
+      - google-workspace-credentials:/app/google-workspace-credentials
+      - sandbox-data:/app/.eve/sandbox-cache
+      - workspace-data:/app/workspaces
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["npm", "run", "migrate:runtime"]
+    environment:
+      DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      WORKFLOW_POSTGRES_URL: ${WORKFLOW_POSTGRES_URL:?WORKFLOW_POSTGRES_URL is required}
+    restart: "no"
+
+  sandbox-runtime-image:
+    build:
+      context: .
+      target: sandbox-runtime
+    command: ["true"]
+    image: osinara-sandbox-runtime:local
+    network_mode: none
+    restart: "no"
+
+  sandbox-runner:
+    build:
+      context: .
+      target: sandbox-runner
+    depends_on:
+      sandbox-egress-proxy:
+        condition: service_healthy
+      sandbox-runtime-image:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 4
+    environment:
+      SANDBOX_RUNTIME_IMAGE: osinara-sandbox-runtime:local
+    networks:
+      - sandbox-control
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - tool-environments:/runner/tools
+      - workspace-data:/runner/workspaces
+
+  sandbox-egress-proxy:
+    build:
+      context: .
+      target: sandbox-egress-proxy
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 4
+    networks:
+      - default
+      - sandbox-egress
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+  memory-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    cpus: 1.5
+    mem_limit: 1536m
+    command:
+      - --model-id
+      - intfloat/multilingual-e5-small
+      - --revision
+      - 614241f622f53c4eeff9890bdc4f31cfecc418b3
+      - --tokenization-workers
+      - "2"
+      - --max-client-batch-size
+      - "8"
+      - --max-concurrent-requests
+      - "8"
+      - --max-batch-requests
+      - "8"
+      - --max-batch-tokens
+      - "4096"
+      - --auto-truncate=false
+    environment:
+      OMP_NUM_THREADS: "2"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+    restart: unless-stopped
+    volumes:
+      - memory-embedding-model-e5:/data
+
+  memory-embedding-worker:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      memory-embedding:
+        condition: service_healthy
+    entrypoint: ["node", ".runtime/scripts/memory-embedding-worker.js"]
+    environment:
+      DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+    restart: unless-stopped
+
+  memory-extraction-worker:
+    build:
+      context: .
+      target: runtime
+    entrypoint: ["node", ".runtime/scripts/memory-extraction-worker.js"]
+    network_mode: none
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-extraction-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs<30000)process.exit(1)"]
+      interval: 30s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  telegram-ingress-worker:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      - agent
+    entrypoint: ["node", ".runtime/scripts/telegram-ingress-worker.js"]
+    environment:
+      AGENT_INTERNAL_BASE_URL: http://agent:3000
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
+    restart: unless-stopped
+
+  edge:
+    image: nginx:1.29-alpine
+    depends_on:
+      - agent
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  cli-proxy-auth:
+  google-workspace-credentials:
+  postgres-data:
+  memory-embedding-model-e5:
+  sandbox-data:
+  tool-environments:
+  workspace-data:
+
+networks:
+  sandbox-control:
+    internal: true
+  sandbox-egress:
+    internal: true

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 4,
+  "provider": "deepseek",
+  "agent": {
+    "transport": {
+      "protocol": "deepseek-responses",
+      "baseUrl": "https://api.deepseek.com",
+      "reasoning": {
+        "effort": "max"
+      }
+    },
+    "models": {
+      "primary": {
+        "id": "deepseek-v4-flash",
+        "contextWindowTokens": 1000000,
+        "maxOutputTokens": 128000
+      },
+      "vision": {
+        "supportsImageInput": false
+      }
+    }
+  },
+  "voice": {
+    "enabled": true,
+    "transcriptionModelId": "whisper-large-v3-turbo"
+  }
+}

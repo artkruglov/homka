@@ -1,0 +1,25 @@
+name: GigaAM speech service
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  speech:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Test and build speech service from canonical commit
+        run: |
+          python3 -m unittest discover -s infra/gigaam -p 'test_*.py'
+          docker build --platform linux/amd64 -t "osinara-gigaam:sha-$GITHUB_SHA" infra/gigaam
+          mkdir speech-bundle
+          docker image inspect "osinara-gigaam:sha-$GITHUB_SHA" > speech-bundle/image.json
+          docker save "osinara-gigaam:sha-$GITHUB_SHA" | gzip -1 > speech-bundle/image.tar.gz
+          cd speech-bundle
+          sha256sum image.json image.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gigaam-${{ github.sha }}
+          path: speech-bundle/
+          retention-days: 3

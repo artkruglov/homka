@@ -1,0 +1,24 @@
+name: Telegram relay image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Test and build relay from canonical commit
+        run: |
+          docker build --platform linux/amd64 --build-arg OCI_REVISION="$GITHUB_SHA" --build-arg OCI_SOURCE="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" -t "osinara-relay:sha-$GITHUB_SHA" infra/telegram-relay
+          mkdir relay-bundle
+          docker image inspect "osinara-relay:sha-$GITHUB_SHA" > relay-bundle/image.json
+          docker save "osinara-relay:sha-$GITHUB_SHA" | gzip -1 > relay-bundle/image.tar.gz
+          cd relay-bundle
+          sha256sum image.json image.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: telegram-relay-${{ github.sha }}
+          path: relay-bundle/
+          retention-days: 3

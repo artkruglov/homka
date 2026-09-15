@@ -1,0 +1,77 @@
+{
+  "name": "osinara-family-agent",
+  "version": "0.20.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "eve build && node --experimental-strip-types scripts/validate-eve-tool-surface-build.ts",
+    "build:runtime": "esbuild scripts/reconcile-telegram-group.ts scripts/audit-legacy-spaces.ts scripts/preflight-spaces.ts scripts/prove-audience.ts scripts/bind-legacy-spaces.ts scripts/spaces-cutover.ts scripts/verify-closed-rollback.ts scripts/check-outside.ts scripts/create-bootstrap-code.ts scripts/migrate-workflow.ts scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/memory-extraction-worker.ts scripts/telegram-ingress-worker.ts scripts/validate-model-provider-config.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
+    "bootstrap:code": "node --experimental-strip-types scripts/create-bootstrap-code.ts",
+    "audit:legacy-spaces": "node --import tsx scripts/audit-legacy-spaces.ts",
+    "dev": "eve dev",
+    "install:gws": "node --experimental-strip-types scripts/install-google-workspace-cli.ts",
+    "setup:google": "node --experimental-strip-types scripts/configure-google-workspace-cli.ts",
+    "start": "eve start",
+    "test": "vitest run && node --test infra/telegram-relay/relay.node-test.mjs",
+    "test:workflow-stress": "node --experimental-strip-types scripts/run-workflow-postgres-stress.ts",
+    "eval:prompt": "tsx stress/prompt-evals/compare.ts",
+    "test:watch": "vitest",
+    "typecheck": "tsc",
+    "preflight:spaces": "node --import tsx scripts/preflight-spaces.ts",
+    "prove:audience": "node --import tsx scripts/prove-audience.ts",
+    "bind:legacy-spaces": "node --import tsx scripts/bind-legacy-spaces.ts",
+    "spaces:cutover": "node --import tsx scripts/spaces-cutover.ts",
+    "verify:rollback": "node --import tsx scripts/verify-closed-rollback.ts",
+    "migrate": "node --experimental-strip-types scripts/migrate-workflow.ts && node --experimental-strip-types scripts/migrate.ts",
+    "migrate:runtime": "node .runtime/scripts/migrate-workflow.js && node .runtime/scripts/migrate.js",
+    "memory:reindex": "node --import tsx scripts/reindex-memory.ts",
+    "postinstall": "node --experimental-strip-types scripts/apply-eve-patches.ts",
+    "reset:workflow-stress": "node --experimental-strip-types scripts/reset-workflow-stress-database.ts",
+    "eval:search": "node --import tsx stress/search-evals/run.ts",
+    "check:outside": "node --import tsx scripts/check-outside.ts",
+    "audit:legacy-spaces:runtime": "node .runtime/scripts/audit-legacy-spaces.js",
+    "preflight:spaces:runtime": "node .runtime/scripts/preflight-spaces.js",
+    "prove:audience:runtime": "node .runtime/scripts/prove-audience.js",
+    "bind:legacy-spaces:runtime": "node .runtime/scripts/bind-legacy-spaces.js",
+    "spaces:cutover:runtime": "node .runtime/scripts/spaces-cutover.js",
+    "verify:rollback:runtime": "node .runtime/scripts/verify-closed-rollback.js",
+    "check:outside:runtime": "node .runtime/scripts/check-outside.js"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.37",
+    "@ai-sdk/groq": "4.0.27",
+    "@ai-sdk/openai": "4.0.58",
+    "@ai-sdk/openai-compatible": "3.0.29",
+    "@googleworkspace/cli": "0.22.5",
+    "@workflow/world-postgres": "5.0.0-beta.35",
+    "ai": "7.0.60",
+    "dockerode": "5.0.1",
+    "eve": "0.40.0",
+    "file-type": "22.0.1",
+    "pg": "8.22.0",
+    "tar-stream": "3.2.0",
+    "tsx": "4.23.0",
+    "undici": "8.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/dockerode": "4.0.1",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.20.0",
+    "@types/tar-stream": "3.1.4",
+    "esbuild": "0.28.1",
+    "postject": "1.0.0-alpha.6",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "overrides": {
+    "ai": "7.0.60"
+  }
+}

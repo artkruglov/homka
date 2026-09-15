@@ -1,0 +1,41 @@
+services:
+  memory-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    cpus: 1.5
+    mem_limit: 1536m
+    command:
+      - --model-id
+      - intfloat/multilingual-e5-small
+      - --revision
+      - 614241f622f53c4eeff9890bdc4f31cfecc418b3
+      - --tokenization-workers
+      - "2"
+      - --max-client-batch-size
+      - "8"
+      - --max-concurrent-requests
+      - "8"
+      - --max-batch-requests
+      - "8"
+      - --max-batch-tokens
+      - "4096"
+      - --auto-truncate=false
+    environment:
+      OMP_NUM_THREADS: "2"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    volumes:
+      - memory-retrieval-eval-model:/data
+
+  tests:
+    depends_on:
+      memory-embedding:
+        condition: service_healthy
+    environment:
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+      RUN_MEMORY_RETRIEVAL_EVALS: "true"
+
+volumes:
+  memory-retrieval-eval-model:
