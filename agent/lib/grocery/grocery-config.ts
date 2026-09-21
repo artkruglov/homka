@@ -22,3 +22,14 @@ export const GROCERY_CART_MAX_ITEMS = 20;
 export const GROCERY_CART_MIN_QUANTITY = 0.01;
 export const GROCERY_CART_MAX_QUANTITY = 40;
 export const GROCERY_REQUEST_TIMEOUT_MS = 15_000;
+/**
+ * Источник открыт для всех без ключа и защищён общим ограничителем частоты, поэтому отказ по
+ * частоте это не сбой, а нормальный режим. После него каталог не опрашивается: каждая новая
+ * просьба человека иначе тратила бы попытку и снова получала отказ.
+ */
+export const GROCERY_RATE_LIMIT_COOLDOWN_MS = 10 * 60_000;
+/** Одна повторная попытка чтения после короткой паузы снимает случайное совпадение запросов. */
+export const GROCERY_READ_RETRY_DELAY_MS = 2_000;
+/** Выдача каталога в пределах разговора не устаревает, а повтор запроса стоит попытки. */
+export const GROCERY_CACHE_TTL_MS = 10 * 60_000;
+export const GROCERY_CACHE_MAX_ENTRIES = 200;

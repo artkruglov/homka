@@ -22,7 +22,7 @@ import {
   GROCERY_CART_MIN_QUANTITY,
   GROCERY_SEARCH_MAX_ITEMS,
 } from "../grocery/grocery-config.js";
-import { callGroceryTool } from "../grocery/grocery-mcp-client.js";
+import { callGroceryCatalog } from "../grocery/grocery-throttle.js";
 import {
   groceryCartLink,
   groceryDetails,
@@ -78,13 +78,13 @@ export default defineTool({
   async execute(input,ctx) {
     return withIntegrationSpace(requireMemoryAuthorization(ctx),async()=>{
     if (input.action === "search") {
-      const result = await callGroceryTool("vkusvill_products_search", {
+      const result = await callGroceryCatalog("vkusvill_products_search", {
         mode: "short", page: input.page ?? 1, q: input.query!, sort: input.sort ?? "popularity",
       });
       return groceryItems(result, GROCERY_SEARCH_MAX_ITEMS);
     }
     if (input.action === "details") {
-      return groceryDetails(await callGroceryTool("vkusvill_product_details", {
+      return groceryDetails(await callGroceryCatalog("vkusvill_product_details", {
         id: input.productId!,
       }));
     }
@@ -109,7 +109,7 @@ export default defineTool({
       return { q: Number(quantity.toFixed(2)), xml_id: id };
     });
     return {
-      link: groceryCartLink(await callGroceryTool("vkusvill_cart_link_create", { products })),
+      link: groceryCartLink(await callGroceryCatalog("vkusvill_cart_link_create", { products })),
       positions: products.length,
     };
     });

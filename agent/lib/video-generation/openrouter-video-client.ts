@@ -36,6 +36,25 @@ async function boundedBytes(response: Response, max: number, failure: () => AppE
   }
   return Buffer.concat(chunks);
 }
+const REJECTION_DETAIL_LIMIT = 300;
+/** The provider names every refusal; keep a short, key-free excerpt instead of guessing about the balance. */
+async function rejectionDetail(response: Response, apiKey: string): Promise<string> {
+  let raw: string;
+  try {
+    raw = (await boundedBytes(response, 16*1024,
+      () => error('RESPONSE_INVALID', 'Сервис видео вернул некорректный ответ'))).toString('utf8');
+  } catch { return ''; }
+  let detail = raw;
+  try {
+    const payload = JSON.parse(raw);
+    const message = payload?.error?.message ?? payload?.message;
+    const step = payload?.error?.metadata?.failed_routing_step;
+    detail = [typeof message === 'string' ? message : '', typeof step === 'string' ? `шаг «${step}»` : '']
+      .filter(Boolean).join('; ');
+  } catch { /* Not JSON: the truncated body still says more than a generic hint. */ }
+  const safe = apiKey ? detail.split(apiKey).join('***') : detail;
+  return safe.replace(/\s+/gu, ' ').trim().slice(0, REJECTION_DETAIL_LIMIT);
+}
 async function readJson(response: Response) {
   return JSON.parse((await boundedBytes(response, 2*1024*1024,
     () => error('RESPONSE_INVALID', 'Сервис видео вернул некорректный ответ'))).toString('utf8'));
@@ -114,7 +133,9 @@ export function createOpenRouterVideoClient(options: {apiKey: string; fetch?: ty
         })});
       } catch { throw unknown(); }
       if ([400,401,402,403,404,422,429].includes(response.status)) {
-        throw error('REJECTED', `OpenRouter отклонил видеозадание (HTTP ${response.status}). Проверьте баланс и доступ к модели`);
+        const detail = await rejectionDetail(response, options.apiKey);
+        throw error('REJECTED', `OpenRouter отклонил видеозадание (HTTP ${response.status}). ${
+          detail || 'Провайдер не назвал причину; проверьте баланс и доступ к модели'}`);
       }
       if (!response.ok) throw unknown();
       try {

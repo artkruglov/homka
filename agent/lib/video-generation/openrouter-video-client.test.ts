@@ -6,6 +6,11 @@ const input = { model: 'minimax/hailuo-3-max', prompt: 'A kettle steaming', dura
 const catalog = {data: [{id: input.model, supported_durations: [5,6],
   supported_resolutions: ['480p','768p'], supported_aspect_ratios: ['16:9','1:1']}]};
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {status});
+const submitRefusal = async (fetch: typeof globalThis.fetch): Promise<Error> => {
+  try { await createOpenRouterVideoClient({apiKey:'secret-key',fetch}).submit(input); }
+  catch (refusal) { return refusal as Error; }
+  throw new Error('submit resolved instead of refusing');
+};
 
 describe('OpenRouter video jobs', () => {
   it('retains confirmed usage and recognizes terminal cancelled or expired jobs',async()=>{
@@ -54,6 +59,20 @@ describe('OpenRouter video jobs', () => {
         .rejects.toMatchObject({code:'AGENT_VIDEO_STATUS_UNKNOWN'});
       expect(fetch).toHaveBeenCalledTimes(1);
     });
+  it('quotes why the provider refused the job instead of guessing about the balance', async () => {
+    const fetch=vi.fn().mockImplementation(async()=>json({error:{message:'Duration 3s is not supported for this model',
+      code:400,metadata:{failed_routing_step:'Validate Video Parameters'}}},400));
+    const refusal=await submitRefusal(fetch);
+    expect(refusal).toMatchObject({code:'AGENT_VIDEO_REJECTED'});
+    expect(refusal.message).toContain('Duration 3s is not supported for this model');
+    expect(refusal.message).toContain('Validate Video Parameters');
+  });
+  it('keeps a refusal readable without leaking the key when the body is not JSON', async () => {
+    const fetch=vi.fn().mockResolvedValue(new Response(`<html>\n  bad request for secret-key\n</html>`,{status:422}));
+    const refusal=await submitRefusal(fetch);
+    expect(refusal.message).toContain('bad request for ***');
+    expect(refusal.message).not.toContain('secret-key');
+  });
   it('treats a refused job as definitive and validates job identifiers before fetching', async () => {
     const fetch=vi.fn().mockResolvedValue(json({},402));
     const client=createOpenRouterVideoClient({apiKey:'key',fetch});
