@@ -18,7 +18,7 @@ export const readSharedTasksInput = z.object({
   cursor: z.string().max(300).optional(),
   listName: z.string().trim().min(1).max(100).optional(),
   careAreaRef: z.uuid().optional(),
-  view: z.enum(["mine", "promised", "waiting", "open", "today", "transfers", "ideas", "rituals", "planned", "inbox"])
+  view: z.enum(["mine", "promised", "waiting", "open", "today", "transfers", "ideas", "rituals", "planned", "inbox", "done"])
     .optional(),
 }).strict();
 
@@ -27,7 +27,7 @@ export default defineTool({
     "Прочитать дела текущей области для обзора. Менять их отсюда нельзя.",
     "view mine мои дела, promised что от меня ждут, waiting чего жду я, open свободные,",
     "today срок или личный план на сегодня и всё просроченное, transfers ожидающие передачи, ideas, rituals, planned.",
-    "inbox: неразобранные идеи и дела без срока и плана.",
+    "inbox: неразобранные идеи и дела без срока и плана. Без view показаны только незакрытые, view done показывает завершённые и отменённые.",
     "listName сужает до одного списка, nextCursor передай как cursor для следующей страницы.",
   ].join(" "),
   inputSchema: readSharedTasksInput,

@@ -9,7 +9,7 @@ import { readFamilySpaceMode } from "./family-space-mode.js";
 export function taskSpaceAction(input:SharedTaskInput):SpaceAction {
   if(["list","lists","participants","history"].includes(input.action)) return "read";
   if(input.action==="create" && (!input.kind || input.kind==="task")) return "propose_task";
-  if(["complete","accept","decline","accept_transfer","decline_transfer"].includes(input.action)) return "complete_own_task";
+  if(["complete","reopen","accept","decline","accept_transfer","decline_transfer"].includes(input.action)) return "complete_own_task";
   return "write";
 }
 

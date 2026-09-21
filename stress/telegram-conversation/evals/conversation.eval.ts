@@ -119,7 +119,7 @@ export default defineEval({
       }
 
       // Приёмка вдвоём: те же настоящие пути, но прикладными инструментами и от двух людей.
-      const acceptance = [
+      const acceptance: { addressed?: false; chatId: number; from: number; marker: string }[] = [
         { chatId: FAMILY_CHAT_ID, from: OWNER_TELEGRAM_ID, marker: "conversation-task-1" },
         // Личное дело владельца: оно не должно попасть в чужой список ни при каком виде выдачи.
         { chatId: OWNER_TELEGRAM_ID, from: OWNER_TELEGRAM_ID, marker: "conversation-personal-1" },
@@ -139,6 +139,10 @@ export default defineEval({
         { chatId: FAMILY_CHAT_ID, from: OWNER_TELEGRAM_ID, marker: "conversation-consent-1" },
         { chatId: FAMILY_CHAT_ID, from: SPOUSE_TELEGRAM_ID, marker: "conversation-consent-2" },
         { chatId: FAMILY_CHAT_ID, from: SPOUSE_TELEGRAM_ID, marker: "conversation-feedback-1" },
+        // T03: семейная группа слышит реплику без обращения и записывает из неё дела.
+        { addressed: false, chatId: FAMILY_CHAT_ID, from: OWNER_TELEGRAM_ID, marker: "conversation-capture-1" },
+        // T05/T06: закрыть два из них в личке одним вызовом.
+        { chatId: OWNER_TELEGRAM_ID, from: OWNER_TELEGRAM_ID, marker: "conversation-close-1" },
       ];
       // Напоминание создаётся репозиторием, а не ходом модели: `manage_reminder` всегда требует
       // подтверждения кнопкой, а возобновление припаркованного хода проверяется отдельными
@@ -165,7 +169,7 @@ export default defineEval({
             chat: { id: step.chatId, type: step.chatId > 0 ? "private" : "supergroup", title: "Acceptance" },
             date: Math.floor(Date.now() / 1_000),
             from: { id: step.from, first_name: "Human", is_bot: false },
-            text: `Осинара, ${step.marker}`,
+            text: step.addressed === false ? step.marker : `Осинара, ${step.marker}`,
             ...(step.marker === "conversation-answer-1" ? {reply_to_message:deliveredErrandReply} : {}),
           } }),
         });
@@ -284,6 +288,16 @@ export default defineEval({
       // Принятие возникает только от действия получателя: поручение ждёт его согласия.
       assert.deepEqual(task.find((row) => row.title === "Записать сына к врачу"),
         { assignee_telegram_id: String(SPOUSE_TELEGRAM_ID), status: "proposed", title: "Записать сына к врачу" });
+      // T03 и T05: неадресованный список стал семейными делами, два из них закрыты из лички одним пакетом.
+      const captured = (await db.query<{ scope: string; status: string; title: string }>(
+        `SELECT scope,status,title FROM shared_tasks WHERE family_id=$1
+          AND title IN ('Повесить шторы','Продать опель','Отвезти матрас и свет') ORDER BY title`, [family.id],
+      )).rows;
+      assert.deepEqual(captured, [
+        { scope: "family", status: "accepted", title: "Отвезти матрас и свет" },
+        { scope: "family", status: "completed", title: "Повесить шторы" },
+        { scope: "family", status: "completed", title: "Продать опель" },
+      ]);
       // Личное дело владельца принято им самим и остаётся личным.
       assert.deepEqual(task.find((row) => row.title === "Сходить к стоматологу"),
         { assignee_telegram_id: String(OWNER_TELEGRAM_ID), status: "accepted", title: "Сходить к стоматологу" });

@@ -176,6 +176,15 @@ describe("Telegram group turn context", () => {
     expect((await prepare(input)).currentMessageEnvelope).not.toContain("earlierMessagesInSeries");
   });
 
+  it("tells the model why a group turn started inside the current message envelope", async () => {
+    const prepare = createTelegramGroupTurnContextPreparer(dependencies(null));
+
+    const result = await prepare({ ...input, triggeredBy: "unaddressed" });
+
+    expect(result.currentMessageEnvelope).toContain('"triggeredBy":"unaddressed"');
+    expect((await prepare(input)).currentMessageEnvelope).not.toContain("triggeredBy");
+  });
+
   it("embeds the bootstrap timeline and reply ancestry into a new durable turn", async () => {
     const deps = dependencies(null);
     deps.journal.listRecent.mockResolvedValue([entry("98", "Казань"), entry("99", "Тула")]);

@@ -658,16 +658,17 @@ describe("createTelegramMessageHandler", () => {
     );
   });
 
-  it("does not let an unaddressed series wake the model", async () => {
+  it("does not let an unaddressed series wake the model in an addressed_only group", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
       groupId: "group-1",
-      messageMode: "all",
+      messageMode: "addressed_only",
       telegramChatId: "group-101",
       toolAllowlist: [],
       type: "family_private",
     });
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "member", userId: "user-1" });
     const handler = createTelegramMessageHandler(repository as never);
 
     const result = await handler(telegramContext().context, {
@@ -680,6 +681,33 @@ describe("createTelegramMessageHandler", () => {
 
     expect(result).toBeNull();
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
+  });
+
+  it("answers an unaddressed series of a family group in all mode with one turn on its last message", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({
+      familyId: "family-1",
+      groupId: "group-1",
+      messageMode: "all",
+      telegramChatId: "group-101",
+      toolAllowlist: [],
+      type: "family_private",
+    });
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "member", userId: "user-1" });
+    const handler = createTelegramMessageHandler(repository as never);
+    const series = (role: "context" | "current") => ({
+      ...groupMessage(role === "context" ? "надо повесить шторы" : "и продать опель"),
+      raw: { date: 1_700_000_000, osinara_series: role === "context"
+        ? { role }
+        : { addressed: false, role, telegramMessageIds: ["1", "2"] } },
+    });
+
+    await expect(handler(telegramContext().context, series("context"))).resolves.toBeNull();
+    const result = await handler(telegramContext().context, series("current"));
+
+    expect(result).not.toBeNull();
+    expect(repository.session.prepareTurn).toHaveBeenCalledTimes(1);
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(expect.objectContaining({ triggeredBy: "unaddressed" }));
   });
 
   it("starts a group turn for an agent name with the verified group policy", async () => {

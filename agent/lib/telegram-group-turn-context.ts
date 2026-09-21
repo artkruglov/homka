@@ -32,6 +32,7 @@ import {
   type TelegramGroupJournalRepository,
 } from "./telegram-group-journal-repository.js";
 import type { TelegramReplyTargetSnapshot } from "./telegram-reply-target-snapshot.js";
+import type { TelegramGroupTurnTrigger } from "./telegram-message-policy.js";
 
 interface PrepareTelegramGroupTurnContextInput {
   applicationSessionId: string;
@@ -49,6 +50,8 @@ interface PrepareTelegramGroupTurnContextInput {
   replyToSequenceId: string | null;
   /** Earlier messages of the same author answered by this turn (see `telegram-message-series.ts`). */
   seriesSequenceIds?: readonly string[];
+  /** Why a group turn started; the model stays silent on `unaddressed` unless there is a task. */
+  triggeredBy?: TelegramGroupTurnTrigger;
   /** IANA timezone for timeline stamps; null renders UTC. */
   timezone?: string | null;
 }
@@ -136,6 +139,7 @@ function currentTelegramMessageEnvelope(
     | "replyTargetUnavailable"
     | "replyToSequenceId"
     | "seriesSequenceIds"
+    | "triggeredBy"
   >,
 ): string {
   const snapshotConflict = input.replyTargetSnapshot !== null &&
@@ -149,6 +153,7 @@ function currentTelegramMessageEnvelope(
     sourceSequence: input.currentSequence,
     senderDisplayName: input.currentSenderDisplayName,
     senderUsername: input.currentSenderUsername,
+    ...(input.triggeredBy === undefined ? {} : { triggeredBy: input.triggeredBy }),
     ...(input.replyTargetSnapshot
       ? { replyTargetSnapshot: input.replyTargetSnapshot }
       : input.replyTargetUnavailable

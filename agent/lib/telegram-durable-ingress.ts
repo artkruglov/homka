@@ -322,7 +322,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
           continue;
         }
 
-        if (claim.voice && update.kind === "message" && shouldTranscribeVoice(update.message, dependencies.botUsername)) {
+        if (claim.voice && update.kind === "message" && shouldTranscribeVoice(update.message)) {
           const authorized = await dependencies.authorizeVoice(update.message);
           if (authorized) {
             if (!claim.transcript) {

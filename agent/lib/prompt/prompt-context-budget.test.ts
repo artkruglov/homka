@@ -19,7 +19,9 @@ const CORE_CHARACTER_BUDGET = 11_700;
 // чата это перенос внутри того же кэшируемого префикса, а не новый текст.
 // Raised by 300 on 14 September 2026 (upstream 4ca7a86): a chat setting is born only by an
 // explicit durable request; a remark, joke or one-off "не делай так" is not stored.
-const PRIVATE_CHARACTER_BUDGET = 13_600;
+// Raised by 300 on 21 September 2026: several tasks of one message go in one batch, and an
+// unclear request to close tasks gets one question with short options instead of re-reading.
+const PRIVATE_CHARACTER_BUDGET = 13_900;
 // Raised by 400 on 5 September 2026 for the memory selection criterion and slot guidance, then by
 // 300 on 6 September for the addressing section with the explicit silence directive, then by
 // 300 the same day for the pending-messages rule in that section, then by 200 on 7 September for
@@ -27,7 +29,10 @@ const PRIVATE_CHARACTER_BUDGET = 13_600;
 // the group length ceiling, then by 100 for the mandatory used-memory directive wording.
 // Raised by 400 on 9 September 2026 for the joke target rotation sentence.
 // Raised by 900 on 11 September 2026 for the planning section moved out of the tool descriptor.
-const FAMILY_CHARACTER_BUDGET = 16_100;
+// Raised by 500 on 21 September 2026 for the listening family group: the triggeredBy field and
+// the rule to record a task or stay silent when nobody addressed the agent (T03), then by 300
+// the same day for the batch and one-question rule of the planning section.
+const FAMILY_CHARACTER_BUDGET = 16_900;
 // Raised by 400 on 6 September 2026 for the addressing section with the explicit silence directive,
 // then by 2 200 on 7 September for the participants section ported from upstream v0.21.2: opinions
 // about behaviour on request, comparisons by a stated criterion, no diagnoses, no template refusal,

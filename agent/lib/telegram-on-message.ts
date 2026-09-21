@@ -29,7 +29,10 @@ import { handleTelegramEnrollmentBoundary } from "./telegram-enrollment-boundary
 import { groupCanonicalContinuationToken } from "./sessions/group-canonical-token.js";
 import {
   classifyTelegramInboundMedia,
+  isAgentNameMentioned,
   isMessageAddressedToBot,
+  telegramGroupTurnTrigger,
+  type TelegramGroupTurnTrigger,
   isTelegramSlashCommand,
 } from "./telegram-message-policy.js";
 import { parseExternalGroupToolAllowlist } from "./tool-policy/group-tool-catalog.js";
@@ -78,14 +81,26 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     const dispatchText = [message.text, message.caption].filter(Boolean).join("\n");
     const routingText = Object.hasOwn(message.raw, "voice") ? message.caption : dispatchText;
     let addressed = isMessageAddressedToBot({ ...message, text: routingText }, botUsername);
+    let groupTrigger: TelegramGroupTurnTrigger | null =
+      telegramGroupTurnTrigger({ ...message, text: routingText }, botUsername);
+    // Текст голосового это расшифровка: команды и подписи по-прежнему читаются только из подписи,
+    // но имя, сказанное голосом, тоже обращение (W15). Нерасшифрованный голос текста не имеет.
+    if (!addressed && Object.hasOwn(message.raw, "voice") && isAgentNameMentioned(message.text)) {
+      addressed = true;
+      groupTrigger = "name_in_text";
+    }
     // A series marker comes from the durable ingress, never from Telegram: earlier messages of a
     // run are journaled without a turn, and the last one answers the whole run.
     const series = readTelegramSeriesMarker(message.raw);
     const seriesContext = series?.role === "context";
-    if (series?.role === "current" && series.addressed) addressed = true;
+    if (series?.role === "current" && series.addressed) {
+      addressed = true;
+      groupTrigger ??= "series";
+    }
     const unsupportedGroupSlashCommand = message.chat.type !== "private" &&
       isTelegramSlashCommand(routingText);
     let verifiedReplyRoute: string | undefined;
+    let listensUnaddressed = false;
     let exactReplyRoute: string | undefined;
     let hasResumableReplyRoute = false;
 
@@ -120,6 +135,14 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     let inboundTimeline: Awaited<
       ReturnType<TelegramMessageRepositories["journal"]["record"]>
     > | null = null;
+    // Неадресованная реплика, на которую ход не начнётся, всё равно уходит в тихую проверку памяти.
+    const observeUnaddressed = async () => {
+      if (!group || inboundTimeline?.status !== "inserted") return;
+      await repositories.memoryReview.observePassiveMessage({
+        groupId: group.groupId,
+        timelineEntryId: inboundTimeline.entryId,
+      });
+    };
     const hasLazyGroupAttachment = group !== null && message.attachments.length > 0 &&
       (group.type === "family_private" || externalImageAllowed || externalTextAttachmentAllowed);
     if (message.chat.type !== "private") {
@@ -156,7 +179,10 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         }
         return null;
       }
-      if (inboundTimeline.replyToAgent) addressed = true;
+      if (inboundTimeline.replyToAgent) {
+        addressed = true;
+        if (groupTrigger !== "mention") groupTrigger = "reply_to_agent";
+      }
       const routeEligibleReply = message.replyToMessage &&
         (inboundTimeline.replyToAgent || message.replyToMessage.from?.isBot !== false);
       if (routeEligibleReply) {
@@ -167,6 +193,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         for (const candidateRoute of candidateRoutes) {
           if (await repositories.session.hasRoute(candidateRoute)) {
             addressed = true;
+            if (groupTrigger !== "mention") groupTrigger = "reply_to_agent";
             verifiedReplyRoute = candidateRoute;
             hasResumableReplyRoute = true;
             break;
@@ -178,8 +205,12 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           "AGENT_TELEGRAM_TIMELINE_REPLY_ROUTE_MISSING: Для подтверждённого ответа в истории отсутствует Telegram-маршрут",
         );
       }
+      // Семейная группа в режиме `all` слышит сообщения без обращения (T03): «кто возьмёт?» должно
+      // стать делом. Решение о молчании остаётся за моделью, чужие авторы отсекаются доступом ниже.
+      listensUnaddressed = !addressed && group.type === "family_private" &&
+        group.messageMode === "all" && actor.kind === "telegram_user";
       // Authorized family attachment references are retained without waking the model.
-      if ((!addressed || seriesContext) && !hasLazyGroupAttachment) {
+      if (((!addressed && !listensUnaddressed) || seriesContext) && !hasLazyGroupAttachment) {
         if (inboundTimeline.status === "inserted") {
           if (actor.kind === "telegram_user" || actor.kind === "telegram_bot") {
             await repositories.memoryReview.observePassiveMessage({
@@ -236,6 +267,8 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     if (!decision.allowed) {
       // Group denials remain silent; private users receive a safe enrollment hint.
       if (message.chat.type === "private") await ctx.telegram.sendMessage(decision.error.message);
+      // Неадресованная реплика чужого автора остаётся пассивной записью, как без режима `all`.
+      if (listensUnaddressed) await observeUnaddressed();
       return null;
     }
 
@@ -281,8 +314,8 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       )
       : null;
     const lazyAttachment = currentAttachment ?? replyAttachment;
-    if (!addressed || journalDuplicate || seriesContext) {
-      if (!addressed && !journalDuplicate && group && inboundTimeline &&
+    if ((!addressed && !listensUnaddressed) || journalDuplicate || seriesContext) {
+      if (!addressed && !listensUnaddressed && !journalDuplicate && group && inboundTimeline &&
         (actor.kind === "telegram_user" || actor.kind === "telegram_bot")) {
         await repositories.memoryReview.observePassiveMessage({
           groupId: group.groupId,
@@ -336,7 +369,8 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       }, conversation.id,
         repositories.threadNotices, (text) => ctx.telegram.sendMessage(text));
     }
-    if (group) {
+    // Разовое уведомление группы ждёт обращения к боту: иначе его вызвала бы любая реплика.
+    if (group && addressed) {
       const policyNotice = await repositories.profilePolicies.claimPendingGroupNotice(group.groupId);
       if (policyNotice) {
         await ctx.telegram.sendMessage(
@@ -395,6 +429,11 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     // Неподтверждённый чат не тратит ход впустую: иначе модель отработала бы, а ответ всё равно
     // приостановился бы на доставке — человек остался бы без ответа после оплаченного вызова.
     if (await repositories.spaces.resolveTelegramChatMode(spaceSelection) === "unproven") {
+      // Предупреждение отвечает тому, кто обратился; на каждую реплику чата оно звучало бы шумом.
+      if (listensUnaddressed) {
+        await observeUnaddressed();
+        return null;
+      }
       await ctx.telegram.sendMessage(
         "Состав этого чата ещё не подтверждён, поэтому я здесь пока не отвечаю. Подтвердите его в личном чате владельца.",
       );
@@ -463,6 +502,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           replyTargetUnavailable: inboundTimeline.replyTargetUnavailable,
           replyToSequenceId: inboundTimeline.replyToSequenceId,
           ...(seriesSequenceIds.length === 0 ? {} : { seriesSequenceIds }),
+          ...(group ? { triggeredBy: groupTrigger ?? "unaddressed" } : {}),
           timezone,
         })
       : null;
@@ -547,6 +587,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       replyHandling,
       storedAttachments,
       imageAnalysis,
+      groupTurnTrigger: group ? groupTrigger ?? "unaddressed" : null,
       timelineEntryId: inboundTimeline.entryId,
       timezone,
       turnContext: groupTurnContext,

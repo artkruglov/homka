@@ -4,6 +4,7 @@
  * Exports:
  * - `CompletedTelegramOutput`: final message, silent reaction, or interim progress decision.
  * - `completedTelegramOutput`: validates model output before Telegram delivery.
+ * - `silentGroupTurnRecord`: log record for a group turn that ended in deliberate silence.
  *
  * Provider adapters route typed reasoning parts to dedicated Eve events that this delivery
  * policy never receives.
@@ -47,6 +48,19 @@ export type CompletedTelegramOutput =
   | { emoji: TelegramMessageReactionEmoji; kind: "reaction" }
   | { kind: "message"; memoryUsedDeclared: boolean; memoryUsedRefs: string[]; message: string }
   | { kind: "progress"; message: string };
+
+/**
+ * Групповой ход, закончившийся без текста, — это решение модели промолчать. Запись с причиной
+ * хода показывает, сколько ходов семейная группа в режиме `all` тратит впустую.
+ */
+export function silentGroupTurnRecord(
+  data: { finishReason: string },
+  attributes: Readonly<Record<string, unknown>> | undefined,
+): { code: "AGENT_TELEGRAM_SILENT_TURN"; trigger: string } | null {
+  const trigger = attributes?.telegramGroupTurnTrigger;
+  if (data.finishReason !== "stop" || typeof trigger !== "string") return null;
+  return { code: "AGENT_TELEGRAM_SILENT_TURN", trigger };
+}
 
 export function completedTelegramOutput(data: {
   finishReason: string;

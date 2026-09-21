@@ -139,11 +139,11 @@ describe("manage_telegram_group model input", () => {
     });
     await expect(manageTelegramGroup.execute({
       action: "update_policy",
-      messageMode: "all",
+      messageMode: "addressed_only",
       telegramChatId: "-1001234567890",
       toolAllowlist: ["search_memories"],
     }, context)).resolves.toMatchObject({
-      messageMode: "all",
+      messageMode: "addressed_only",
       toolAllowlist: ["search_memories"],
     });
     await expect(manageTelegramGroup.execute({
@@ -157,8 +157,21 @@ describe("manage_telegram_group model input", () => {
       '{"action":"status"}',
       '{"action":"start_new_context","telegramChatId":"-1001234567890"}',
       '{"action":"remove","telegramChatId":"-1001234567890"}',
-      "addressed_only | all | owner_only",
+      "family_private: messageMode=addressed_only | all",
+      "external: messageMode=addressed_only | owner_only",
       "family_private | external",
     ]) expect(manageTelegramGroup.description).toContain(fragment);
+    expect(manageTelegramGroup.description).not.toContain('"messageMode":"all","toolAllowlist"');
+  });
+
+  it("rejects all for an external group before HITL: only the family group listens to every message", async () => {
+    for (const invalid of [
+      { action: "update_policy", messageMode: "all", telegramChatId: "-1001234567890", toolAllowlist: ["search_memories"] },
+      { action: "register", registration: { messageMode: "all", telegramChatId: "-1001234567890", title: "Внешняя",
+        toolAllowlist: ["search_memories"], type: "external" } },
+    ]) {
+      expect(() => approvalFor(invalid)).toThrowError(/AGENT_TELEGRAM_GROUP_INPUT_INVALID/u);
+      await expect(manageTelegramGroup.execute(invalid as never, context)).rejects.toThrowError(/messageMode/u);
+    }
   });
 });

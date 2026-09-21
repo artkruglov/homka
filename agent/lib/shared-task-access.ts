@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { spaceReadClause } from "./spaces/space-sql.js";
 import { AppError } from "./app-error.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
-import type { SharedTaskInput, SharedTaskStatus } from "./shared-tasks.js";
+import { CLOSED_TASK_STATUSES, UNFINISHED_TASK_STATUSES, type SharedTaskInput, type SharedTaskStatus } from "./shared-tasks.js";
 import { isCurrentTelegramMember } from "./telegram-current-membership.js";
 import { decodeDateUuidCursor, encodeDateUuidCursor, paginationFilterDigest } from "./keyset-pagination.js";
 export interface TaskRow {
@@ -123,8 +123,19 @@ const TODAY_ORDER = `CASE
     WHEN t.due_on IS NOT NULL OR t.due_at IS NOT NULL THEN 1 ELSE 2 END,
   COALESCE(t.due_at, (t.due_on AT TIME ZONE $14)), date_trunc('milliseconds',t.created_at), t.id`;
 
+/**
+ * Список показывает незакрытое, пока не попросили иначе: закрытые и отменённые в общем выводе
+ * заставляли модель перебирать реестр, чтобы понять, что осталось. Чтение по id видит запись в
+ * любом статусе — иначе повтор операции и ответ после закрытия не нашли бы только что закрытое.
+ */
+function listedStatuses(id: string | readonly string[] | null, input: SharedTaskInput): readonly string[] | null {
+  if (id !== null) return null;
+  if (input.status) return [input.status];
+  return input.view === "done" ? CLOSED_TASK_STATUSES : UNFINISHED_TASK_STATUSES;
+}
+
 export async function readTasks(client: PoolClient, auth: MemoryAuthorization, scope: MemoryScope,
-  id: string | null = null, input: SharedTaskInput = {action:"list"}, timezone = "UTC") {
+  id: string | readonly string[] | null = null, input: SharedTaskInput = {action:"list"}, timezone = "UTC") {
   // Even filtering shared records by a private plan would reveal that plan in the group.
   if (auth.groupId && (input.view === "planned" || input.from || input.until)) denied();
   const binding=paginationFilterDigest([auth.familyId,auth.telegramUserId,auth.groupId,auth.space?.spaceId ?? null,auth.space ? String(auth.space.policyVersion) : null,scope,input.view ?? null,input.status ?? null,input.listName ?? null,input.from ?? null,input.until ?? null,input.careAreaRef ?? null]);
@@ -152,8 +163,8 @@ export async function readTasks(client: PoolClient, auth: MemoryAuthorization, s
      LEFT JOIN users u ON u.telegram_user_id=t.assignee_telegram_id
      LEFT JOIN shared_task_participants p ON p.family_id=t.family_id
        AND p.group_id IS NOT DISTINCT FROM t.group_id AND p.telegram_user_id=t.assignee_telegram_id
-     WHERE t.family_id=$1 AND (${visible(scope, input.view)}) AND ($4::uuid IS NULL OR t.id=$4)
-       AND ($5::text IS NULL OR t.status=$5)
+     WHERE t.family_id=$1 AND (${visible(scope, input.view)}) AND ($4::uuid[] IS NULL OR t.id=ANY($4::uuid[]))
+       AND ($5::text[] IS NULL OR t.status=ANY($5::text[]))
        AND ($3::uuid IS NULL OR TRUE) AND ($2::text IS NOT NULL)
        AND ($6::text IS NULL OR t.list_name=$6)
        AND ($7::text IS NULL OR t.kind=$7)
@@ -168,7 +179,8 @@ export async function readTasks(client: PoolClient, auth: MemoryAuthorization, s
          AND NOT EXISTS(SELECT 1 FROM shared_task_versions v WHERE v.task_id=t.id AND v.action IN ('clarify','activate'))))
      ORDER BY ${input.view === "today" ? TODAY_ORDER : "date_trunc('milliseconds',t.created_at) DESC, t.id DESC"}
      LIMIT 101`,
-    [auth.familyId, auth.telegramUserId, auth.groupId, id, input.status ?? null, input.listName ?? null,
+    [auth.familyId, auth.telegramUserId, auth.groupId, id === null ? null : typeof id === "string" ? [id] : [...id],
+      listedStatuses(id, input), input.listName ?? null,
       input.view === "ideas" ? "idea" : input.view === "rituals" ? "ritual" : ["mine","waiting","open","promised","transfers"].includes(input.view ?? "") ? "task" : null,
       input.from ?? null,input.until ?? null,cursor?.timestamp ?? null,cursor?.id ?? null,input.view === "planned",
       input.view === "today" ? localDate(timezone) : null, timezone, input.careAreaRef ?? null, input.view === "inbox", auth.space?.spaceId ?? null, auth.space?.policyVersion ?? null, auth.userId],
@@ -223,6 +235,20 @@ export function present(row: TaskRow, personalPlan=true) {
       : { interval: row.recurrence_interval, unit: row.recurrence_unit },
     plannedFrom:personalPlan ? row.planned_from : null,plannedUntil:personalPlan ? row.planned_until : null,
     commitment:row.kind === "task", };
+}
+
+/**
+ * Строка списка: чтобы выбрать дело и действовать по id, хватает названия, статуса, срока и
+ * источника. Описание, исходная формулировка и область заботы приходят только по `get`:
+ * двадцать полей на строку делали каждый list тяжёлым и подталкивали перечитывать реестр.
+ */
+export function presentSummary(row: TaskRow, personalPlan=true) {
+  const full = present(row, personalPlan);
+  return { id: full.id, title: full.title, status: full.status, kind: full.kind, dueAt: full.dueAt,
+    dueOn: full.dueOn, source: full.source, assignee: full.assignee, curator: full.curator,
+    listName: full.listName, version: full.version, repeat: full.repeat,
+    pendingAssignee: full.pendingAssignee, reminderCreated: full.reminderCreated,
+    plannedFrom: full.plannedFrom, plannedUntil: full.plannedUntil };
 }
 
 export async function participants(client: PoolClient, auth: MemoryAuthorization, scope: MemoryScope) {

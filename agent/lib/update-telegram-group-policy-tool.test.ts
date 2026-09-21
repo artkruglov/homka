@@ -83,7 +83,7 @@ describe("manage_telegram_group.update_policy", () => {
 
   it("describes a complete in-place replacement without type or title", () => {
     expect(manageTelegramGroup.description).toContain(
-      '{"action":"update_policy","telegramChatId":"-1001234567890","messageMode":"all","toolAllowlist":["search_memories"]}',
+      '{"action":"update_policy","telegramChatId":"-1001234567890","messageMode":"addressed_only","toolAllowlist":["search_memories"]}',
     );
     expect(manageTelegramGroup.description).toContain("без type и title");
     expect(manageTelegramGroup.description).toContain(

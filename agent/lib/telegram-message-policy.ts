@@ -176,19 +176,35 @@ export function isTelegramSlashCommand(text: string): boolean {
   return TELEGRAM_COMMAND_PATTERN.test(text);
 }
 
+/**
+ * Почему в группе начался ход. Модель получает причину в конверте текущего сообщения: на
+ * `unaddressed` (семейная группа в режиме `all`) она действует только при явном деле или
+ * просьбе, иначе молчит. `series` — обращение было в одном из предыдущих сообщений серии.
+ */
+export type TelegramGroupTurnTrigger = "mention" | "reply_to_agent" | "name_in_text" | "series" | "unaddressed";
+
+/** Addressing reason of a group message, or null when the bot was not addressed. */
+export function telegramGroupTurnTrigger(
+  message: TelegramDispatchMessage,
+  botUsername: string,
+): Exclude<TelegramGroupTurnTrigger, "series" | "unaddressed"> | null {
+  if (message.chat.type === "private" || message.chat.type === "channel") return null;
+  if (isTelegramSlashCommand(message.text)) return null;
+
+  // Mentions and replies must target the complete username of this bot, not another bot.
+  const addressedByMention = Array.from(message.text.matchAll(TELEGRAM_MENTION_PATTERN)).some(
+    (match) => match.groups?.target?.toLowerCase() === botUsername.toLowerCase(),
+  );
+  if (addressedByMention) return "mention";
+  if (isReplyToBot(message, botUsername)) return "reply_to_agent";
+  return isAgentNameMentioned(message.text) ? "name_in_text" : null;
+}
+
 export function isMessageAddressedToBot(
   message: TelegramDispatchMessage,
   botUsername: string,
 ): boolean {
   // Private messages are direct by definition; channels never dispatch to the agent.
   if (message.chat.type === "private") return true;
-  if (message.chat.type === "channel") return false;
-  if (isTelegramSlashCommand(message.text)) return false;
-
-  // Mentions and replies must target the complete username of this bot, not another bot.
-  const addressedByMention = Array.from(message.text.matchAll(TELEGRAM_MENTION_PATTERN)).some(
-    (match) => match.groups?.target?.toLowerCase() === botUsername.toLowerCase(),
-  );
-  if (addressedByMention) return true;
-  return isReplyToBot(message, botUsername) || isAgentNameMentioned(message.text);
+  return telegramGroupTurnTrigger(message, botUsername) !== null;
 }

@@ -98,6 +98,31 @@ const ACCEPTANCE: Readonly<Record<string, {
       },
     ],
   },
+  // T03: список дел без обращения в семейной группе, которая слышит все реплики, одним пакетом.
+  "conversation-capture": {
+    steps: [{
+      input: () => ({ action: "batch", items: [
+        { action: "create", title: "Повесить шторы" },
+        { action: "create", title: "Продать опель" },
+        { action: "create", title: "Отвезти матрас и свет" },
+      ] }),
+      tool: "manage_shared_tasks",
+    }],
+  },
+  // T05/T06: из лички закрываются два дела, заведённые в группе, одним пакетом.
+  "conversation-close": {
+    steps: [
+      { input: () => ({ action: "list" }), tool: "manage_shared_tasks" },
+      {
+        input: (results) => ({ action: "batch", items: [
+          { action: "complete", id: taskId(results, "Повесить шторы") },
+          { action: "complete", id: taskId(results, "Продать опель") },
+        ] }),
+        tool: "manage_shared_tasks",
+      },
+    ],
+    reply: (results) => `closed=${tasksOf(results, 1).map((task) => task.title).join("|")}`,
+  },
   "conversation-buy": {
     steps: [{
       input: () => ({ action: "add", listName: "Продукты", title: "Молоко" }),

@@ -57,14 +57,14 @@ describeWithDatabase("Telegram conversation end-to-end", () => {
       const summary = result.stdout.match(/CONVERSATION_SUMMARY (\{.*\})/u)?.[1];
       expect(summary, result.stdout.slice(-2000)).toBeDefined();
       expect(JSON.parse(summary!)).toEqual({
-        acceptanceTurns: 15,
-        openTasks: 4,
+        acceptanceTurns: 17,
+        openTasks: 7,
         reminderChatId: "902",
         remindersDelivered: 1,
         sandboxSessions: 6,
         sessions: 2,
         shoppingItems: 2,
-        turns: 71,
+        turns: 73,
       });
       expect(result.stderr).not.toContain("AGENT_MEMORY_UNAVAILABLE");
     } catch (error) {

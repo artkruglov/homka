@@ -109,6 +109,7 @@ describe("manage_telegram_group.register", () => {
         action: "register",
         registration: {
           ...input,
+          messageMode: "addressed_only",
           toolAllowlist: ["remember"],
           type: "external",
         },

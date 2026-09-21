@@ -136,7 +136,7 @@ describe("manage_telegram_group.status", () => {
     expect(approvalFor({ action: "start_new_context", telegramChatId: "-1001" })).toBe("not-applicable");
     expect(approvalFor({
       action: "update_policy",
-      messageMode: "all",
+      messageMode: "addressed_only",
       telegramChatId: "-1001",
       toolAllowlist: [],
     })).toBe("user-approval");

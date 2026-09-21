@@ -8,7 +8,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { completedTelegramOutput } from "./telegram-progress.js";
+import { silentGroupTurnRecord, completedTelegramOutput } from "./telegram-progress.js";
 
 describe("completedTelegramOutput", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -153,5 +153,15 @@ describe("completedTelegramOutput", () => {
     { finishReason: "stop" },
   ])("does not expose an empty technical step %#", (data) => {
     expect(completedTelegramOutput(data)).toBeNull();
+  });
+});
+
+describe("silent group turn record", () => {
+  it("names why a group turn ended without an answer, and ignores private and interim steps", () => {
+    expect(silentGroupTurnRecord({ finishReason: "stop" }, { telegramGroupTurnTrigger: "unaddressed" }))
+      .toEqual({ code: "AGENT_TELEGRAM_SILENT_TURN", trigger: "unaddressed" });
+    expect(silentGroupTurnRecord({ finishReason: "stop" }, { groupType: undefined })).toBeNull();
+    expect(silentGroupTurnRecord({ finishReason: "tool-calls" }, { telegramGroupTurnTrigger: "mention" })).toBeNull();
+    expect(silentGroupTurnRecord({ finishReason: "stop" }, undefined)).toBeNull();
   });
 });

@@ -51,8 +51,11 @@ const TOOL_ACTIONS = [
   "update_policy",
 ] as const;
 const GROUP_TYPES = ["family_private", "external"] as const;
+// `all` значит «семейная группа слышит реплики без обращения» (T03). Во внешней группе
+// неадресованного хода не бывает, поэтому там это значение ничего бы не включило.
 const STANDARD_MESSAGE_MODES = ["addressed_only", "all"] as const;
-const EXTERNAL_MESSAGE_MODES = [...STANDARD_MESSAGE_MODES, "owner_only"] as const;
+const EXTERNAL_MESSAGE_MODES = ["addressed_only", "owner_only"] as const;
+const PUBLISHED_MESSAGE_MODES = ["addressed_only", "all", "owner_only"] as const;
 const TOP_LEVEL_FIELDS = [
   "action",
   "messageMode",
@@ -63,7 +66,7 @@ const TOP_LEVEL_FIELDS = [
 const REGISTRATION_FIELDS = ["messageMode", "telegramChatId", "title", "toolAllowlist", "type"] as const;
 
 const registrationSchema = z.object({
-  messageMode: z.enum(EXTERNAL_MESSAGE_MODES).optional().describe("Обязательно внутри registration: addressed_only, all или owner_only для external."),
+  messageMode: z.enum(PUBLISHED_MESSAGE_MODES).optional().describe("Обязательно внутри registration: addressed_only или all для family_private, addressed_only или owner_only для external."),
   telegramChatId: z.string().optional().describe("Обязательный точный отрицательный Telegram chat ID регистрируемой группы."),
   title: z.string().optional().describe("Обязательное отображаемое название регистрируемой группы."),
   toolAllowlist: z.array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES)).optional().describe("Только для registration.type=external; для family_private поле не передавайте."),
@@ -74,8 +77,8 @@ const manageTelegramGroupSchema = z.object({
   action: z.enum(TOOL_ACTIONS).describe(
     "Сначала выберите ровно один action: register, remove, start_new_context, status или update_policy.",
   ),
-  messageMode: z.enum(EXTERNAL_MESSAGE_MODES).optional().describe(
-    "Передавайте только при action=update_policy. Для register используйте registration.messageMode; для остальных actions поле не передавайте.",
+  messageMode: z.enum(PUBLISHED_MESSAGE_MODES).optional().describe(
+    "Передавайте только при action=update_policy (внешняя группа: addressed_only или owner_only). Для register используйте registration.messageMode; для остальных actions поле не передавайте.",
   ),
   registration: registrationSchema.optional().describe(
     "Передавайте только при action=register. Для остальных actions полностью пропустите registration.",
@@ -229,9 +232,10 @@ const TOOL_DESCRIPTION = [
   "Выбери один action и передавай только его payload; лишние поля других actions не заполняй, telegramChatId бери из status, не угадывай. Status не требует подтверждения: {\"action\":\"status\"}.",
   "Повторный register с другим type пересоздаёт trust zone и безвозвратно удаляет её историю, workspace, память и сессии; для смены прав используй update_policy: он сохраняет ID, название, тип и все данные. Remove не выводит бота из чата. Start_new_context не удаляет timeline, память, файлы и pending tasks: следующая реплика в main-чате и каждой теме начнёт новую canonical generation.",
   "Чтобы включить или выключить одно право, сначала status, затем полный toolAllowlist с одним изменением. Во внешней группе messageMode=owner_only сохраняет общую timeline, но ход запускает только владелец семьи; Telegram admin-права его не заменяют.",
-  "Enums: action=register | remove | start_new_context | status | update_policy; type=family_private | external; messageMode=addressed_only | all | owner_only.",
+  "Семейная группа с messageMode=all слышит реплики без обращения и записывает из них дела, на остальное молчит; addressed_only отвечает только на обращение. Режим семейной группы меняется повторным register с тем же type, данные сохраняются; update_policy только для external.",
+  "Enums: action=register | remove | start_new_context | status | update_policy; type=family_private | external; family_private: messageMode=addressed_only | all; external: messageMode=addressed_only | owner_only.",
   "Register: {\"action\":\"register\",\"registration\":{\"type\":\"family_private\",\"telegramChatId\":\"-1001234567890\",\"title\":\"Семейный чат\",\"messageMode\":\"addressed_only\"}}; для external добавь в registration \"toolAllowlist\":[\"search_memories\"].",
-  "Update_policy: {\"action\":\"update_policy\",\"telegramChatId\":\"-1001234567890\",\"messageMode\":\"all\",\"toolAllowlist\":[\"search_memories\"]} без type и title. Start_new_context: {\"action\":\"start_new_context\",\"telegramChatId\":\"-1001234567890\"}. Remove: {\"action\":\"remove\",\"telegramChatId\":\"-1001234567890\"}.",
+  "Update_policy: {\"action\":\"update_policy\",\"telegramChatId\":\"-1001234567890\",\"messageMode\":\"addressed_only\",\"toolAllowlist\":[\"search_memories\"]} без type и title. Start_new_context: {\"action\":\"start_new_context\",\"telegramChatId\":\"-1001234567890\"}. Remove: {\"action\":\"remove\",\"telegramChatId\":\"-1001234567890\"}.",
 ].join(" ");
 
 export default defineTool({

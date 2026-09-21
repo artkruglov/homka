@@ -57,7 +57,7 @@ suite('shared task repository',()=>{
     expect((await tasks.execute(owner,{action:'list',view:'inbox'} as never,'read')).tasks).toEqual([]);
     expect((await tasks.execute(member,{action:'list',view:'inbox'} as never,'read')).tasks).toEqual([]);
     await tasks.execute(owner,{action:'update',id:task.id,version:clarified.task!.version,title:'Посмотреть бассейн рядом'},'edit');
-    expect((await tasks.execute(owner,{action:'list'},'read')).tasks?.[0]).toMatchObject({originalText:{title:'Разобраться с выходными'}});
+    expect((await tasks.execute(owner,{action:'get',id:task.id} as never,'read')).task).toMatchObject({originalText:{title:'Разобраться с выходными'}});
     expect((await database().query('SELECT count(*)::int AS n FROM shared_tasks')).rows[0].n).toBe(1);
   });
   it('projects only my assignments into my private overview with their source',async()=>{
@@ -94,7 +94,7 @@ suite('shared task repository',()=>{
     const replay=await tasks.execute(member,{action:'accept',id:task.id},'accept');
     expect(replay.replayed).toBe(true);
     expect((await tasks.execute(member,{action:'complete',id:task.id},'done')).task?.status).toBe('completed');
-    expect((await tasks.execute(familyGroup,{action:'list'},'read')).tasks?.[0]?.status).toBe('completed');
+    expect((await tasks.execute(familyGroup,{action:'list',view:'done'} as never,'read')).tasks?.[0]?.status).toBe('completed');
   });
   it('lets an observed external participant propose a task to a family member, without accepting for them',async()=>{
     await recordVerifiedHumanTelegramMessage(group.groupId!, {

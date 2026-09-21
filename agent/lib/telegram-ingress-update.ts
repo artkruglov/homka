@@ -5,7 +5,7 @@
  * - `telegramUpdateId`: validated update id of the raw webhook body.
  * - `telegramQueueKey`: one FIFO per chat/topic, or per message-less callback.
  * - `telegramVoiceMetadata`: persisted voice fields of a raw update.
- * - `shouldTranscribeVoice`: only addressed voice reaches the paid transcription provider.
+ * - `shouldTranscribeVoice`: every non-channel voice asks for a transcript; the voice authorizer decides.
  * - `withCaptionlessAttachmentText`: non-empty factual model text for a captionless attachment.
  * - `withTranscript`: raw payload with the stored transcript as its message text.
  */
@@ -14,7 +14,6 @@ import { telegramContinuationToken } from "eve/channels/telegram";
 import { z } from "zod";
 
 import { AppError } from "./app-error.js";
-import { isMessageAddressedToBot } from "./telegram-message-policy.js";
 
 const CAPTIONLESS_ATTACHMENT_MODEL_TEXT = "Пользователь отправил файл без подписи.";
 
@@ -68,9 +67,13 @@ export function telegramVoiceMetadata(raw: Record<string, unknown>) {
   };
 }
 
-export function shouldTranscribeVoice(message: TelegramMessage, botUsername: string): boolean {
-  const dispatchText = [message.text, message.caption].filter(Boolean).join("\n");
-  return isMessageAddressedToBot({ ...message, text: dispatchText }, botUsername);
+/**
+ * Голос расшифровывается до решения об адресации: имя, сказанное голосом, иначе не распознать, а
+ * семейная группа в режиме `all` слышит и реплики без обращения. Кого расшифровывать, решает
+ * авторизация голоса: только личный чат семьи и семейная группа, внешние до провайдера не доходят.
+ */
+export function shouldTranscribeVoice(message: Pick<TelegramMessage, "chat">): boolean {
+  return message.chat.type !== "channel";
 }
 
 export function withCaptionlessAttachmentText(update: TelegramUpdate): TelegramUpdate {

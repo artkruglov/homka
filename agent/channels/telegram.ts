@@ -20,7 +20,7 @@ import { handleTelegramDurableIngress } from "../lib/telegram-durable-ingress.js
 import { formatTelegramTurnFailure, isUnrecoverableHistoryFailure } from "../lib/telegram-interface.js";
 import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
-import { completedTelegramOutput } from "../lib/telegram-progress.js";
+import { completedTelegramOutput, silentGroupTurnRecord } from "../lib/telegram-progress.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
 import { progressNoticeKey, telegramProgressNoticeDeferral } from "../lib/telegram-progress-deferral.js";
 import { refreshTelegramReactionPolicy } from "../lib/telegram-reaction-policy.js";
@@ -143,7 +143,11 @@ export default telegramChannel({
       // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
       if (isScheduledSession(ctx) && data.finishReason !== "stop") return;
       const output = completedTelegramOutput(data);
-      if (!output) return;
+      if (!output) {
+        const silent = silentGroupTurnRecord(data, ctx.session.auth.current?.attributes);
+        if (silent) console.info(JSON.stringify(silent));
+        return;
+      }
       const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
       const noticeKey = progressNoticeKey(ctx.session.id, ctx.session.turn.id);
