@@ -21,7 +21,9 @@ const CORE_CHARACTER_BUDGET = 11_700;
 // explicit durable request; a remark, joke or one-off "не делай так" is not stored.
 // Raised by 300 on 21 September 2026: several tasks of one message go in one batch, and an
 // unclear request to close tasks gets one question with short options instead of re-reading.
-const PRIVATE_CHARACTER_BUDGET = 13_900;
+// Raised by 700 on 22 September 2026 for the coach reply section: consent only on an explicit
+// yes, what to keep from an answer, and nothing shared with the partner unless asked.
+const PRIVATE_CHARACTER_BUDGET = 14_600;
 // Raised by 400 on 5 September 2026 for the memory selection criterion and slot guidance, then by
 // 300 on 6 September for the addressing section with the explicit silence directive, then by
 // 300 the same day for the pending-messages rule in that section, then by 200 on 7 September for

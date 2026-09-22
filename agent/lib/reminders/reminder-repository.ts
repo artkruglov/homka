@@ -57,6 +57,8 @@ export interface ReminderUpdateInput {
 }
 
 export interface NotificationSettingsView {
+  /** `null`: приглашения коуча не было или на него не ответили. */
+  coachEnabled: boolean | null;
   initiativeDailyLimit: number;
   initiativeEnabled: boolean;
   quietEnd: string | null;
@@ -108,8 +110,44 @@ export const reminderRepository = {
     }
   },
 
+  /**
+   * Согласие на коуча. Пишется только в существующие настройки: без часового пояса коуч спрашивал
+   * бы в чужое время, поэтому сначала человек называет пояс.
+   */
+  async setCoach(auth: ReminderAuthorization, enabled: boolean): Promise<NotificationSettingsView> {
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      await requireCurrentMembership(client, auth);
+      const updated = await client.query(
+        "UPDATE user_notification_settings SET coach_enabled = $2, updated_at = now() WHERE user_id = $1",
+        [auth.userId, enabled],
+      );
+      if (updated.rowCount !== 1) {
+        throw new AppError(
+          "AGENT_NOTIFICATION_SETTINGS_REQUIRED",
+          "Сначала нужен часовой пояс: без него я не пойму, когда уместно писать",
+        );
+      }
+      await client.query(
+        `INSERT INTO audit_events (family_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, 'notifications.coach', jsonb_build_object('enabled', $3::boolean))`,
+        [auth.familyId, auth.userId, enabled],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    console.info(JSON.stringify({ code: "AGENT_COACH_CONSENT_CHANGED", enabled, familyId: auth.familyId }));
+    return await this.getNotificationSettings(auth);
+  },
+
   async getNotificationSettings(auth: ReminderAuthorization): Promise<NotificationSettingsView> {
     const result = await database().query<{
+      coach_enabled: boolean | null;
       initiative_daily_limit: number;
       initiative_enabled: boolean;
       quiet_end: string | null;
@@ -118,7 +156,8 @@ export const reminderRepository = {
     }>(
       `SELECT to_char(settings.quiet_end, 'HH24:MI') AS quiet_end,
               to_char(settings.quiet_start, 'HH24:MI') AS quiet_start,
-              settings.timezone, settings.initiative_enabled, settings.initiative_daily_limit
+              settings.timezone, settings.initiative_enabled, settings.initiative_daily_limit,
+              settings.coach_enabled
        FROM user_notification_settings AS settings
        JOIN family_memberships AS membership ON membership.user_id = settings.user_id
        WHERE settings.user_id = $1 AND membership.family_id = $2`,
@@ -132,6 +171,7 @@ export const reminderRepository = {
       );
     }
     return {
+      coachEnabled: settings.coach_enabled,
       initiativeDailyLimit: settings.initiative_daily_limit,
       initiativeEnabled: settings.initiative_enabled,
       quietEnd: settings.quiet_end,

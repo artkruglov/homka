@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { formatTelegramFinalPresentation } from "./telegram-final-presentation.js";
+import { formatTelegramFinalPresentation, TELEGRAM_KEEP_OPEN_DIRECTIVE } from "./telegram-final-presentation.js";
 import { TELEGRAM_ASIDE_DIRECTIVE } from "./telegram-authored-split.js";
 
 describe("Telegram final presentation", () => {
@@ -218,5 +218,23 @@ describe("Telegram final presentation", () => {
     expect(formatTelegramFinalPresentation(`**Риск высокий.**\n\n${body}`)[0]!.text).toBe(
       `**Риск высокий.**\n\n<details><summary>Полный ответ</summary>\n\n${body.trim()}\n\n</details>`,
     );
+  });
+});
+
+describe("a task board kept open", () => {
+  const board = ["**Работа · 20**", ...Array.from({ length: 20 }, (_, i) => `• Дело номер ${i + 1} с подробным названием`),
+    "", "**Дом · 3**", "• Отвезти машину", "• Подобрать страховку", "• Повесить шторы", "", "Открытых дел: 23"].join("\n");
+
+  it("shows a board marked keep-open in full and never delivers the marker", () => {
+    const text = formatTelegramFinalPresentation(`${TELEGRAM_KEEP_OPEN_DIRECTIVE}\n${board}\n\nЧто из этого уже сделано?`)
+      .map((chunk) => chunk.text).join("\n");
+
+    expect(text).not.toContain("Полный ответ");
+    expect(text).not.toContain("telegram-keep-open");
+    expect(text).toContain("Дело номер 20");
+  });
+
+  it("still folds the same long text when the model wrote it without the marker", () => {
+    expect(formatTelegramFinalPresentation(board).map((chunk) => chunk.text).join("\n")).toContain("Полный ответ");
   });
 });

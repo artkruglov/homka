@@ -5,6 +5,7 @@
  * - `TelegramChunkPacing`: whether a chunk opens an authored aside or continues immediately.
  * - `TelegramFinalPresentationChunk`: one plain or rich provider-sized delivery unit.
  * - `formatTelegramFinalPresentation`: selects plain text unless supported markup is present.
+ * - `TELEGRAM_KEEP_OPEN_DIRECTIVE`: a code-rendered task board is shown in full, not folded.
  *
  * Key construct:
  * - Transport selection depends on authored syntax, not message length or a hidden default.
@@ -38,6 +39,12 @@ const LONG_ANSWER_MAX_CHARACTERS = 600;
 const LONG_ANSWER_LEAD_MAX_CHARACTERS = LONG_ANSWER_MAX_CHARACTERS;
 const LONG_ANSWER_LEAD_MAX_LINES = 2;
 const LONG_ANSWER_SUMMARY = "Полный ответ";
+/**
+ * Доска дел, которую инструмент отдал готовой, показывается целиком: человеку нужен весь список
+ * перед глазами, а длина доски это число дел, а не многословие. Директиву ставит код
+ * (`task-board.ts`), модель пересылает доску как есть; до человека маркер не доходит.
+ */
+export const TELEGRAM_KEEP_OPEN_DIRECTIVE = "<telegram-keep-open>";
 
 function usesSupportedRichBlockFormatting(markdown: string): boolean {
   return RICH_BLOCK_PATTERN.test(markdown) || GFM_TABLE_DELIMITER_PATTERN.test(markdown);
@@ -128,8 +135,11 @@ export function formatTelegramFinalPresentation(
 
   // The length policy applies to each authored message on its own, so a long main answer still
   // collapses without swallowing the asides its author separated from it.
+  const present = (part: string) => part.includes(TELEGRAM_KEEP_OPEN_DIRECTIVE)
+    ? part.split(TELEGRAM_KEEP_OPEN_DIRECTIVE).join("").trim()
+    : collapseLongAnswer(part);
   return [
-    ...formatPart(collapseLongAnswer(main), "immediate"),
-    ...asides.flatMap((aside) => formatPart(collapseLongAnswer(aside), "aside")),
+    ...formatPart(present(main), "immediate"),
+    ...asides.flatMap((aside) => formatPart(present(aside), "aside")),
   ];
 }

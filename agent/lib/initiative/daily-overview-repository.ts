@@ -14,7 +14,9 @@ import { database } from "../database.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import { sharedTaskRepository } from "../shared-task-repository.js";
 import { readActiveSpace } from "../spaces/active-space.js";
-import type { DailyOverview, OverviewTask } from "./daily-overview.js";
+import { readFamilySpaceMode } from "../spaces/family-space-mode.js";
+import type { BoardTask } from "../task-board.js";
+import type { DailyOverview } from "./daily-overview.js";
 import type { DailyOverviewRecipient } from "./daily-overview-dispatch.js";
 
 const DEFAULT_DAILY_LIMIT = 3;
@@ -49,10 +51,6 @@ async function overviewSpace(
     [familyId, userId, chosen],
   )).rows[0];
   return space ? { policyVersion: space.policy_version, spaceId: space.id } : null;
-}
-
-function tasksOf(result: { tasks?: { source: string; title: string }[] }): OverviewTask[] {
-  return (result.tasks ?? []).map((task) => ({ source: task.source, title: task.title }));
 }
 
 export const dailyOverviewRepository = {
@@ -100,7 +98,11 @@ export const dailyOverviewRepository = {
     const client = await database().connect();
     let space: { policyVersion: number; spaceId: string } | null;
     try {
-      space = await overviewSpace(client, recipient.familyId, recipient.userId);
+      // Пока семья в прежнем режиме, пространство не подставляется: оно отсекло бы все дела без
+      // привязки к нему. 22 сентября 2026 так пропали три просроченных дела из двадцати семи.
+      space = await readFamilySpaceMode(client, recipient.familyId) === "spaces"
+        ? await overviewSpace(client, recipient.familyId, recipient.userId)
+        : null;
     } finally {
       client.release();
     }
@@ -115,30 +117,29 @@ export const dailyOverviewRepository = {
       telegramUserId: recipient.telegramUserId,
       userId: recipient.userId,
     };
-    const today = await sharedTaskRepository.execute(auth, { action: "list", view: "today" }, "overview");
-    const promised = await sharedTaskRepository.execute(auth, { action: "list", view: "promised" }, "overview");
+    const tasks: BoardTask[] = [];
+    let cursor: string | undefined;
+    // Страница это сто дел; доска всё равно сокращает каждый список, поэтому трёх страниц хватит.
+    for (let page = 0; page < 3; page += 1) {
+      const result = await sharedTaskRepository.execute(auth,
+        { action: "list", ...(cursor ? { cursor } : {}) }, "overview");
+      tasks.push(...(result.tasks ?? []));
+      cursor = result.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
     const waiting = await sharedTaskRepository.execute(auth, { action: "list", view: "waiting", status: "proposed" }, "overview");
-    // «Сегодня» уже содержит просроченное первым; разделяем их по самому сроку, а не по порядку.
-    const day = new Intl.DateTimeFormat("en-CA", { timeZone: recipient.settings.timezone })
-      .format(new Date());
-    const rows = today.tasks ?? [];
-    return {
-      overdue: tasksOf({ tasks: rows.filter((task) => (task.dueOn ?? day) < day) }),
-      promised: tasksOf({tasks:promised.tasks?.filter(task=>['proposed','accepted'].includes(task.status))}),
-      waiting: tasksOf(waiting),
-      today: tasksOf({ tasks: rows.filter((task) => (task.dueOn ?? day) >= day) }),
-    };
+    return { now: new Date(), tasks, timezone: recipient.settings.timezone, waiting: waiting.tasks ?? [] };
   },
 
   /** Заявка на сутки: повтор невозможен по уникальному индексу, а не по проверке в коде. */
-  async claim(recipient: DailyOverviewRecipient, localDate: string): Promise<boolean> {
-    const inserted = await database().query(
+  async claim(recipient: DailyOverviewRecipient, localDate: string): Promise<string | null> {
+    const inserted = await database().query<{ delivery_ref: string }>(
       `INSERT INTO initiative_messages(family_id, user_id, kind, sent_on)
        VALUES ($1, $2, 'suggestion', $3::date)
-       ON CONFLICT DO NOTHING RETURNING id`,
+       ON CONFLICT DO NOTHING RETURNING delivery_ref`,
       [recipient.familyId, recipient.userId, localDate],
     );
-    return inserted.rows.length === 1;
+    return inserted.rows[0]?.delivery_ref ?? null;
   },
 
   async release(recipient: DailyOverviewRecipient, localDate: string): Promise<void> {

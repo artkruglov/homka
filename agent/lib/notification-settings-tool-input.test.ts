@@ -11,9 +11,10 @@ import type { ToolContext } from "eve/tools";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-const { configureNotifications, getNotificationSettings } = vi.hoisted(() => ({
+const { configureNotifications, getNotificationSettings, setCoach } = vi.hoisted(() => ({
   configureNotifications: vi.fn(),
   getNotificationSettings: vi.fn(),
+  setCoach: vi.fn(),
 }));
 
 vi.mock("./reminders/reminder-context.js", () => ({
@@ -23,7 +24,7 @@ vi.mock("./reminders/reminder-context.js", () => ({
   })),
 }));
 vi.mock("./reminders/reminder-repository.js", () => ({
-  reminderRepository: { configureNotifications, getNotificationSettings },
+  reminderRepository: { configureNotifications, getNotificationSettings, setCoach },
 }));
 
 import notificationSettings from "./tools/notification_settings.js";
@@ -52,7 +53,19 @@ describe("notification_settings model input", () => {
 
     expect(schema.type).toBe("object");
     expect(schema.required).toContain("action");
-    expect(schema.properties.action?.enum).toEqual(["get", "set"]);
+    expect(schema.properties.action?.enum).toEqual(["get", "set", "coach"]);
+  });
+
+  it("turns the coach on or off without a button and only with an explicit value", async () => {
+    setCoach.mockResolvedValue({ coachEnabled: true });
+
+    expect(approvalFor({ action: "coach", coachEnabled: true })).toBe("not-applicable");
+    await expect(notificationSettings.execute({ action: "coach", coachEnabled: true } as never, context))
+      .resolves.toEqual({ coachEnabled: true });
+    expect(setCoach).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1" }), true);
+    expect(() => approvalFor({ action: "coach" })).toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*coachEnabled/u);
+    expect(() => approvalFor({ action: "coach", coachEnabled: true, timezone: "UTC" }))
+      .toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID/u);
   });
 
   it("rejects the same incomplete set before HITL and execution", async () => {

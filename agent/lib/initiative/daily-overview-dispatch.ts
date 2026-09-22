@@ -12,9 +12,12 @@
  *
  * Заявка пишется до отправки: два тика подряд не отправят два одинаковых обзора. Отказ Telegram
  * однозначен и заявку возвращает, любой другой сбой оставляет исход неизвестным — повтора нет.
+ * Отправленный обзор пишется в журнал доставок личного чата: иначе ответ «первое сделала» приходил
+ * в ход, который обзора не видел.
  */
 import { MemoryReviewOwnerAlertTransportError } from "../memory-review/memory-review-owner-alert-transport.js";
 import { formatDailyOverview, type DailyOverview } from "./daily-overview.js";
+import type { InitiativeDelivery } from "./initiative-delivery.js";
 import { decideInitiative, type InitiativeSettings, type InitiativeState } from "./initiative-policy.js";
 
 /** Раньше этого часа по местному времени утренний обзор не отправляется. */
@@ -33,9 +36,11 @@ export interface DailyOverviewRecipient {
 export interface DailyOverviewDispatcherDependencies {
   /** Название окна личного времени, если оно идёт прямо сейчас. */
   personalTime(recipient: DailyOverviewRecipient, now: Date): Promise<string | null>;
-  /** Заявка на сутки человека; `false` означает, что обзор сегодня уже отправляли. */
-  claim(recipient: DailyOverviewRecipient, localDate: string): Promise<boolean>;
-  deliver(input: { chatId: string; text: string }): Promise<void>;
+  /** Заявка на сутки человека: ссылка доставки, `null` означает, что обзор сегодня уже отправляли. */
+  claim(recipient: DailyOverviewRecipient, localDate: string): Promise<string | null>;
+  /** Отправка; возвращает подтверждённый id сообщения. */
+  send(input: { chatId: string; text: string }): Promise<string>;
+  record(delivery: InitiativeDelivery): Promise<void>;
   overview(recipient: DailyOverviewRecipient): Promise<DailyOverview>;
   recipients(): Promise<DailyOverviewRecipient[]>;
   release(recipient: DailyOverviewRecipient, localDate: string): Promise<void>;
@@ -65,10 +70,11 @@ export function createDailyOverviewDispatcher(
       const text = formatDailyOverview(await dependencies.overview(recipient),
         { first: recipient.firstEver });
       if (text === null) continue;
-      if (!await dependencies.claim(recipient, local.date)) continue;
+      const deliveryRef = await dependencies.claim(recipient, local.date);
+      if (deliveryRef === null) continue;
+      let messageId: string;
       try {
-        await dependencies.deliver({ chatId: recipient.telegramUserId, text });
-        sent += 1;
+        messageId = await dependencies.send({ chatId: recipient.telegramUserId, text });
       } catch (error) {
         const refused = error instanceof MemoryReviewOwnerAlertTransportError;
         if (refused) await dependencies.release(recipient, local.date);
@@ -76,6 +82,22 @@ export function createDailyOverviewDispatcher(
           code: refused ? "AGENT_DAILY_OVERVIEW_FAILED" : "AGENT_DAILY_OVERVIEW_AMBIGUOUS",
           error: error instanceof Error ? error.message : String(error),
           familyId: recipient.familyId,
+        }));
+        continue;
+      }
+      sent += 1;
+      // Обзор уже у человека: сбой записи в журнал не делает его неотправленным.
+      try {
+        await dependencies.record({
+          at: now, deliveryRef, familyId: recipient.familyId, messageId, sourceKind: "daily_overview",
+          telegramUserId: recipient.telegramUserId, text, userId: recipient.userId,
+        });
+      } catch (error) {
+        console.error(JSON.stringify({
+          code: "AGENT_INITIATIVE_DELIVERY_RECORD_FAILED",
+          error: error instanceof Error ? error.message : String(error),
+          familyId: recipient.familyId,
+          sourceKind: "daily_overview",
         }));
       }
     }

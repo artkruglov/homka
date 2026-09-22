@@ -22,6 +22,13 @@ describe("completedTelegramOutput", () => {
     ).toEqual({ kind: "progress", message: "Собрал информацию. Теперь формирую документ." });
   });
 
+  it("never shows the keep-open directive in an interim notice", () => {
+    expect(
+      completedTelegramOutput({ finishReason: "tool-calls", message: "<telegram-keep-open>\n**Дом · 1**\n• Шторы" }),
+    ).toEqual({ kind: "progress", message: "**Дом · 1**\n• Шторы" });
+    expect(completedTelegramOutput({ finishReason: "tool-calls", message: "<telegram-keep-open>" })).toBeNull();
+  });
+
   it("drops interim text that carries a reaction directive", () => {
     expect(
       completedTelegramOutput({

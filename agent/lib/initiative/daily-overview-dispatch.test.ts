@@ -2,7 +2,8 @@
  * Утренний обзор.
  *
  * Проверяется: ночью молчит, выключенный не приходит, пустой день не тратит ни предел, ни заявку,
- * дважды за сутки не уходит, отказ Telegram возвращает заявку, а неизвестный исход — нет.
+ * дважды за сутки не уходит, отказ Telegram возвращает заявку, а неизвестный исход — нет;
+ * отправленный обзор попадает в журнал доставок личного чата.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -24,11 +25,13 @@ const morning = new Date("2026-09-12T06:10:00.000Z");
 
 function dependencies(overrides: Partial<Parameters<typeof createDailyOverviewDispatcher>[0]> = {}) {
   return {
-    claim: vi.fn().mockResolvedValue(true),
-    deliver: vi.fn().mockResolvedValue(undefined),
+    claim: vi.fn().mockResolvedValue("ref-1"),
+    record: vi.fn().mockResolvedValue(undefined),
+    send: vi.fn().mockResolvedValue("555"),
     personalTime: vi.fn().mockResolvedValue(null),
     overview: vi.fn().mockResolvedValue({
-      overdue: [{ source: "Семья", title: "Оплатить счёт" }], promised: [], today: [],
+      now: new Date("2026-09-22T06:00:00Z"), timezone: "UTC", waiting: [],
+      tasks: [{ dueAt: null, dueOn: "2026-09-20", kind: "task", listName: null, source: "Семья", status: "accepted", title: "Оплатить счёт" }],
     }),
     recipients: vi.fn().mockResolvedValue([person]),
     release: vi.fn().mockResolvedValue(undefined),
@@ -42,7 +45,7 @@ describe("createDailyOverviewDispatcher", () => {
   it("sends the morning overview to the person's own chat", async () => {
     const deps = dependencies();
     await expect(createDailyOverviewDispatcher(deps)(morning)).resolves.toBe(1);
-    expect(deps.deliver).toHaveBeenCalledWith({
+    expect(deps.send).toHaveBeenCalledWith({
       chatId: "101", text: expect.stringContaining("Оплатить счёт"),
     });
   });
@@ -52,13 +55,13 @@ describe("createDailyOverviewDispatcher", () => {
       recipients: vi.fn().mockResolvedValue([{ ...person, firstEver: true }]),
     });
     await createDailyOverviewDispatcher(deps)(morning);
-    expect(deps.deliver).toHaveBeenCalledWith({
+    expect(deps.send).toHaveBeenCalledWith({
       chatId: "101", text: expect.stringContaining("не пиши мне первым"),
     });
     // Второй раз объяснение не повторяется: человек его уже прочитал.
-    const later = dependencies({ deliver: vi.fn().mockResolvedValue(undefined) });
+    const later = dependencies({ send: vi.fn().mockResolvedValue("556") });
     await createDailyOverviewDispatcher(later)(morning);
-    expect(later.deliver).toHaveBeenCalledWith({
+    expect(later.send).toHaveBeenCalledWith({
       chatId: "101", text: expect.not.stringContaining("не пиши мне первым"),
     });
   });
@@ -93,31 +96,49 @@ describe("createDailyOverviewDispatcher", () => {
   it("spends neither the claim nor the daily limit on a day with nothing in it", async () => {
     const deps = dependencies({
       personalTime: vi.fn().mockResolvedValue(null),
-    overview: vi.fn().mockResolvedValue({ overdue: [], promised: [], today: [] }),
+    overview: vi.fn().mockResolvedValue({ now: new Date("2026-09-22T06:00:00Z"), tasks: [], timezone: "UTC", waiting: [] }),
     });
     await expect(createDailyOverviewDispatcher(deps)(morning)).resolves.toBe(0);
     expect(deps.claim).not.toHaveBeenCalled();
-    expect(deps.deliver).not.toHaveBeenCalled();
+    expect(deps.send).not.toHaveBeenCalled();
   });
 
   it("does not send a second overview in the same day", async () => {
-    const deps = dependencies({ claim: vi.fn().mockResolvedValue(false) });
+    const deps = dependencies({ claim: vi.fn().mockResolvedValue(null) });
     await expect(createDailyOverviewDispatcher(deps)(morning)).resolves.toBe(0);
-    expect(deps.deliver).not.toHaveBeenCalled();
+    expect(deps.send).not.toHaveBeenCalled();
   });
 
   it("returns the claim when Telegram refuses and keeps it when the answer is lost", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const refused = dependencies({
-      deliver: vi.fn().mockRejectedValue(
+      send: vi.fn().mockRejectedValue(
         new MemoryReviewOwnerAlertTransportError("failed", "AGENT_TELEGRAM_DELIVERY_REJECTED", "403"),
       ),
     });
     await createDailyOverviewDispatcher(refused)(morning);
     expect(refused.release).toHaveBeenCalledWith(person, "2026-09-12");
 
-    const lost = dependencies({ deliver: vi.fn().mockRejectedValue(new Error("socket hang up")) });
+    const lost = dependencies({ send: vi.fn().mockRejectedValue(new Error("socket hang up")) });
     await createDailyOverviewDispatcher(lost)(morning);
     expect(lost.release).not.toHaveBeenCalled();
+    expect(lost.record).not.toHaveBeenCalled();
+  });
+
+  it("puts the sent overview into the chat's delivery journal so the reply turn sees it", async () => {
+    const deps = dependencies();
+    await createDailyOverviewDispatcher(deps)(morning);
+    expect(deps.record).toHaveBeenCalledWith(expect.objectContaining({
+      deliveryRef: "ref-1", messageId: "555", sourceKind: "daily_overview",
+      telegramUserId: "101", text: expect.stringContaining("Оплатить счёт"), userId: "user-1",
+    }));
+  });
+
+  it("keeps a sent overview sent when the journal write fails", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const deps = dependencies({ record: vi.fn().mockRejectedValue(new Error("db down")) });
+    await expect(createDailyOverviewDispatcher(deps)(morning)).resolves.toBe(1);
+    expect(deps.release).not.toHaveBeenCalled();
+    expect(error.mock.calls[0]![0]).toContain("AGENT_INITIATIVE_DELIVERY_RECORD_FAILED");
   });
 });

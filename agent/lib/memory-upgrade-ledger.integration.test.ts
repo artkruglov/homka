@@ -175,6 +175,8 @@ const POST_V0101_MIGRATIONS = [
   "141_session_cleanup_retry.sql",
   "142_workspace_delivery_turn.sql",
   "144_memory_reinforcement_turns.sql",
+  "145_coach_initiative.sql",
+  "146_coach_touch_claim.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

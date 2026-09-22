@@ -24,14 +24,16 @@ import {
 } from "../tool-input-validation.js";
 
 const INPUT_ERROR_CODE = "AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID";
-const TOOL_ACTIONS = ["get", "set"] as const;
+const TOOL_ACTIONS = ["get", "set", "coach"] as const;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
-const TOP_LEVEL_FIELDS = ["action", "initiativeDailyLimit", "initiativeEnabled", "quietEnd",
+const TOP_LEVEL_FIELDS = ["action", "coachEnabled", "initiativeDailyLimit", "initiativeEnabled", "quietEnd",
   "quietStart", "timezone"] as const;
 
 const nullableTimeSchema = z.union([z.string(), z.null()]).optional();
 const notificationSettingsSchema = z.object({
-  action: z.enum(TOOL_ACTIONS).describe("Обязательный action: get или set."),
+  action: z.enum(TOOL_ACTIONS).describe("Обязательный action: get, set или coach."),
+  coachEnabled: z.boolean().optional()
+    .describe("Обязательно для action=coach: true по явному «да» на приглашение коуча, false на «без коуча»."),
   quietEnd: nullableTimeSchema.describe("Обязательно для action=set: ЧЧ:ММ или null."),
   quietStart: nullableTimeSchema.describe("Обязательно для action=set: ЧЧ:ММ или null."),
   timezone: z.string().optional().describe("Обязательный IANA timezone только для action=set."),
@@ -102,16 +104,24 @@ function requireNotificationSettingsInput(input: unknown) {
   // MiniMax may materialize known set-only siblings for get. The read action ignores them and
   // cannot turn those values into a write; unpublished fields still fail in the global guard.
   if (action === "get") return { action } as const;
+  if (action === "coach") {
+    requireOnlyFields(payload, ["action", "coachEnabled"], "action=coach", INPUT_ERROR_CODE);
+    if (typeof payload["coachEnabled"] !== "boolean") {
+      toolInputError(INPUT_ERROR_CODE, "Для action=coach передайте coachEnabled true или false");
+    }
+    return { action, enabled: payload["coachEnabled"] as boolean } as const;
+  }
   return { action, values: requireSetInput(payload) } as const;
 }
 
 const TOOL_DESCRIPTION = [
-  "Получить или настроить личный IANA timezone и тихие часы. В тихие часы не приходит ничего, что начато без просьбы человека: ни напоминание, ни сводка, ни предупреждение, ни предложение обновления. Отложенное уходит, когда тихие часы кончаются. Get: {\"action\":\"get\"}. Set: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}; quietStart и quietEnd разные значения ЧЧ:ММ, для отключения тихих часов оба null. Просьбу «не пиши мне первым» передавай как initiativeEnabled false, число сообщений в сутки как initiativeDailyLimit; непереданные поля остаются прежними. Не угадывай timezone и часы: если данных нет, спроси пользователя.",
+  "Получить или настроить личный IANA timezone и тихие часы. В тихие часы не приходит ничего, что начато без просьбы человека: ни напоминание, ни сводка, ни предупреждение, ни предложение обновления. Отложенное уходит, когда тихие часы кончаются. Get: {\"action\":\"get\"}. Set: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}; quietStart и quietEnd разные значения ЧЧ:ММ, для отключения тихих часов оба null. Просьбу «не пиши мне первым» передавай как initiativeEnabled false, число сообщений в сутки как initiativeDailyLimit; непереданные поля остаются прежними. Не угадывай timezone и часы: если данных нет, спроси пользователя. Coach: {\"action\":\"coach\",\"coachEnabled\":true} только на явное «да» человека на приглашение коуча, false на «без коуча»; молчание и уклончивый ответ не согласие.",
 ].join(" ");
 
 export default defineTool({
   approval: ({ toolInput }) => {
     const parsed = requireNotificationSettingsInput(toolInput);
+    // Коуч меняет только то, пишет ли бот этому же человеку, и выключается одной фразой.
     return parsed.action === "set" ? "user-approval" : "not-applicable";
   },
   description: TOOL_DESCRIPTION,
@@ -127,6 +137,9 @@ export default defineTool({
     }
     if (parsed.action === "get") {
       return await reminderRepository.getNotificationSettings(authorization);
+    }
+    if (parsed.action === "coach") {
+      return await reminderRepository.setCoach(authorization, parsed.enabled);
     }
 
     return await reminderRepository.configureNotifications(authorization, parsed.values);

@@ -51,4 +51,17 @@ describe("memory review owner alert transport", () => {
         delivery: "failed",
       } satisfies Partial<MemoryReviewOwnerAlertTransportError>);
   });
+
+  it("returns the confirmed message id so a started conversation lands in the journal", async () => {
+    const reply = (body: unknown) => createMemoryReviewOwnerAlertTransport({
+      botToken: "telegram-bot-secret",
+      fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 })),
+      timeoutMilliseconds: 15_000,
+    });
+
+    await expect(reply({ ok: true, result: { message_id: 42 } }).send({ chatId: "101", text: "Привет" }))
+      .resolves.toBe("42");
+    await expect(reply({ ok: true, result: {} }).send({ chatId: "101", text: "Привет" }))
+      .rejects.toMatchObject({ code: "AGENT_TELEGRAM_MESSAGE_ID_MISSING" });
+  });
 });

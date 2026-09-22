@@ -12,6 +12,7 @@ import {
   type TwoSpaceFixture,
 } from "../spaces/two-space-fixture.js";
 import { dailyOverviewRepository } from "./daily-overview-repository.js";
+import { formatDailyOverview } from "./daily-overview.js";
 import type { DailyOverviewRecipient } from "./daily-overview-dispatch.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -67,22 +68,44 @@ dbDescribe("daily overview data", () => {
     await personalTask(fixture.owner, "Записаться к врачу", day(3));
     await personalTask(fixture.spouse, "Её личное дело", TODAY);
 
-    const overview = await dailyOverviewRepository.overview(recipientOf(fixture.owner));
+    const text = formatDailyOverview(await dailyOverviewRepository.overview(recipientOf(fixture.owner)))!;
 
-    expect(overview.overdue.map((task) => task.title)).toEqual(["Оплатить счёт"]);
-    expect(overview.today.map((task) => task.title)).toEqual(["Полить цветы"]);
-    const titles = [...overview.overdue, ...overview.today, ...overview.promised]
-      .map((task) => task.title);
-    expect(titles).not.toContain("Записаться к врачу");
-    expect(titles).not.toContain("Её личное дело");
+    expect(text).toContain("⚠️ Просрочено · 1\n• Оплатить счёт");
+    expect(text).toContain("Сегодня · 1\n• Полить цветы");
+    expect(text).toContain("• Записаться к врачу");
+    expect(text).not.toContain("Её личное дело");
+  });
+
+  it("shows tasks without a space while the family still runs the legacy mode", async () => {
+    // 22 сентября 2026: обзор подставлял личное пространство, и дела без привязки к нему, то есть
+    // почти все старые и новые из семейной группы, пропадали. Три просроченных дела не показывались.
+    await database().query(
+      `INSERT INTO shared_tasks(family_id,scope,creator_telegram_id,assignee_telegram_id,title,status,kind,due_on,list_name)
+       VALUES($1,'personal',$2,$2,'Договориться с мастером','accepted','task',$3::date,'Встречи'),
+             ($1,'personal',$2,$2,'Продвинуться по продаже','accepted','task',NULL,'Работа')`,
+      [fixture.familyId, fixture.owner.telegramUserId, day(-7)],
+    );
+    await database().query(
+      `INSERT INTO shared_tasks(family_id,scope,creator_telegram_id,assignee_telegram_id,title,status,kind,due_at)
+       VALUES($1,'personal',$2,$2,'Встреча в Zoom','accepted','task',now() - interval '6 days')`,
+      [fixture.familyId, fixture.owner.telegramUserId],
+    );
+
+    const text = formatDailyOverview(await dailyOverviewRepository.overview(recipientOf(fixture.owner)))!;
+
+    expect(text).toContain("⚠️ Просрочено · 2");
+    expect(text).toContain("• Договориться с мастером");
+    expect(text).toContain("• Встреча в Zoom");
+    expect(text).toContain("Работа · 1\n• Продвинуться по продаже");
   });
 
   it("gives the day away once and takes it back whole", async () => {
     const recipient = recipientOf(fixture.owner);
-    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toBe(true);
-    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toBe(false);
+    // Заявка отдаёт ссылку доставки: под ней отправленный обзор попадает в журнал личного чата.
+    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toMatch(/^[0-9a-f-]{36}$/u);
+    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toBeNull();
     await dailyOverviewRepository.release(recipient, TODAY);
-    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toBe(true);
+    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toMatch(/^[0-9a-f-]{36}$/u);
   });
 
   it("reads every person with a private chat and their own rule", async () => {

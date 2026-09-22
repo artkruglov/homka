@@ -9,13 +9,15 @@
  */
 import { createDailyOverviewDispatcher } from "./daily-overview-dispatch.js";
 import { dailyOverviewRepository } from "./daily-overview-repository.js";
+import { recordInitiativeDelivery } from "./initiative-delivery.js";
 import { memoryReviewOwnerAlertTransport } from "../memory-review/memory-review-owner-alert-transport.js";
 import { personalTimeRepository } from "../personal-time/personal-time-repository.js";
 
 export function dispatchDailyOverviews(now = new Date()): Promise<number> {
   return createDailyOverviewDispatcher({
     claim: (recipient, localDate) => dailyOverviewRepository.claim(recipient, localDate),
-    deliver: (input) => memoryReviewOwnerAlertTransport.deliver(input),
+    record: recordInitiativeDelivery,
+    send: (input) => memoryReviewOwnerAlertTransport.send(input),
     overview: (recipient) => dailyOverviewRepository.overview(recipient),
     personalTime: (recipient, at) =>
       personalTimeRepository.conflictFor(recipient.telegramUserId, at),

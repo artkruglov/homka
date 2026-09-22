@@ -2,43 +2,30 @@
  * Обзор дня: что бот скажет человеку первым утром.
  *
  * Экспорт:
- * - `DailyOverview`: то, что у человека на сегодня, уже собранное по его личности.
+ * - `DailyOverview`: открытые дела человека и его неотвеченные просьбы, собранные по его личности.
  * - `formatDailyOverview`: текст обзора либо `null`, когда говорить не о чем.
  *
  * Обзор собирается детерминированно и форматируется здесь же, без модели. Так требует раздел 5
  * архитектуры: агент, одновременно видящий все области человека, для этого не запускается —
  * выборка идёт по личности, у каждой строки своя метка источника.
  *
+ * До 22 сентября 2026 обзор показывал только дела со сроком на сегодня: из 27 открытых дел человек
+ * утром видел одно, остальные выпадали из фокуса. Теперь это доска всего открытого
+ * (`task-board.ts`): просроченное, сегодня, затем все дела по спискам.
+ *
  * Молчание это нормальный исход. Сообщение без содержания хуже, чем его отсутствие: человек
  * перестаёт читать утренние сообщения целиком, и следующее, в котором есть дело, тоже пропустит.
  */
-
-export interface OverviewTask {
-  /** Область или чат, из которого дело пришло: одинаковые названия в разных чатах это разные дела. */
-  readonly source: string;
-  readonly title: string;
-}
+import { formatTaskBoard, type BoardTask } from "../task-board.js";
 
 export interface DailyOverview {
+  /** Открытые дела, идеи и традиции человека из всех его областей. */
+  readonly tasks: readonly BoardTask[];
   /** Личные просьбы автора, на которые получатель ещё не ответил. */
-  readonly waiting?: readonly OverviewTask[];
-  /** Дела с сегодняшним сроком или личным планом на сегодня. */
-  readonly today: readonly OverviewTask[];
-  /** Дела, срок которых уже прошёл. */
-  readonly overdue: readonly OverviewTask[];
-  /** Чего от человека ждут другие: поручено ему и ещё не закрыто. */
-  readonly promised: readonly OverviewTask[];
-}
-
-const MAX_LINES_PER_BLOCK = 5;
-
-function block(title: string, tasks: readonly OverviewTask[]): string[] {
-  if (tasks.length === 0) return [];
-  const shown = tasks.slice(0, MAX_LINES_PER_BLOCK)
-    .map((task) => `• ${task.title} — ${task.source}`);
-  // Длинный список не перечисляется целиком: утреннее сообщение читают с телефона одним взглядом.
-  const rest = tasks.length - shown.length;
-  return [title, ...shown, ...(rest > 0 ? [`…и ещё ${rest}`] : [])];
+  readonly waiting: readonly BoardTask[];
+  readonly now: Date;
+  /** Пояс человека: «сегодня» и «просрочено» считаются в его дне. */
+  readonly timezone: string;
 }
 
 /**
@@ -47,7 +34,7 @@ function block(title: string, tasks: readonly OverviewTask[]): string[] {
  * прекратить.
  */
 const FIRST_TIME_EXPLANATION = [
-  "Это утренний обзор: я показываю его раз в день, когда на день что-то есть.",
+  "Это утренний обзор: я показываю его раз в день, когда есть открытые дела.",
   "Скажите «не пиши мне первым» — перестану. Спросите «что ты умеешь здесь» — расскажу.",
 ].join(" ");
 
@@ -56,15 +43,14 @@ export function formatDailyOverview(
   overview: DailyOverview,
   options: { first?: boolean } = {},
 ): string | null {
-  const lines = [
-    ...block("Просрочено:", overview.overdue),
-    ...block("Сегодня:", overview.today),
-    ...block("От вас ждут:", overview.promised),
-    ...block("Жду ответа:", overview.waiting ?? []),
-  ];
-  if (lines.length === 0) return null;
+  // Служебное сообщение уходит без разметки, поэтому доска в простом виде.
+  const board = formatTaskBoard({
+    now: overview.now, style: "plain", tasks: overview.tasks,
+    timezone: overview.timezone, waiting: overview.waiting,
+  });
+  if (board === null) return null;
   return [
-    "Доброе утро. Вот что на сегодня.", "", ...lines,
+    "Доброе утро. Вот твои дела.", "", board,
     ...(options.first === true ? ["", FIRST_TIME_EXPLANATION] : []),
   ].join("\n");
 }

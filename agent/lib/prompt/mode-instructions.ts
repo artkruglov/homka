@@ -45,6 +45,7 @@ import {
   GROUP_TIMELINE_TRUST,
 } from "./group-fragments.js";
 import {
+  COACH_REPLY_RULES,
   CURRENT_TIME_TOOL_RULES,
   FAMILY_PLANNING_RULES,
   OFFICE_DOCUMENT_RULES,
@@ -134,6 +135,7 @@ ${OFFICE_DOCUMENT_RULES}`,
   trustedReminderRules("personal"),
   FAMILY_PLANNING_RULES,
   PROACTIVE_DELIVERY_RULES,
+  COACH_REPLY_RULES,
   `## Осознание времени
 
 ${CURRENT_TIME_TOOL_RULES}`,

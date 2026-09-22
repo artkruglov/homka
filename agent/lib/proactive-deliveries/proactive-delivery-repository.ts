@@ -142,6 +142,13 @@ export async function recordProactiveDelivery(
                  SELECT schedule.space_id FROM agent_schedules AS schedule
                    JOIN agent_schedule_runs AS run ON run.schedule_id = schedule.id
                   WHERE run.id = $6::uuid)
+               -- Бот начал личный разговор сам: вопрос живёт в личном пространстве адресата.
+               WHEN 'daily_overview' THEN (SELECT id FROM spaces WHERE family_id = $1
+                 AND kind = 'personal' AND owner_user_id = $2 AND state = 'active'
+                 ORDER BY created_at LIMIT 1)
+               WHEN 'coach' THEN (SELECT id FROM spaces WHERE family_id = $1
+                 AND kind = 'personal' AND owner_user_id = $2 AND state = 'active'
+                 ORDER BY created_at LIMIT 1)
              END)
      ON CONFLICT (source_kind, source_id, telegram_message_id) DO NOTHING`,
     [
