@@ -168,9 +168,10 @@ export const careAreaRepository = {
         )).rows[0];
         if (!candidate) denied();
         if (candidate.telegram_user_id === locked.owner_telegram_id) denied();
+        // Хозяин остаётся при своей области, пока её не приняли: до согласия отвечает он.
         await client.query(
-          `UPDATE care_areas SET status='proposed', owner_telegram_id=NULL,
-             pending_owner_telegram_id=$2, proposed_at=now(), accepted_at=NULL,
+          `UPDATE care_areas SET status='proposed',
+             pending_owner_telegram_id=$2, proposed_at=now(),
              version=version+1, updated_at=now() WHERE id=$1`,
           [locked.id, candidate.telegram_user_id],
         );
@@ -185,9 +186,12 @@ export const careAreaRepository = {
         );
       } else if (input.action === "decline") {
         if (locked.pending_owner_telegram_id !== actor && locked.creator_telegram_id !== actor) denied();
+        // Отказ возвращает область прежнему хозяину, а без него оставляет её свободной.
         await client.query(
-          `UPDATE care_areas SET status='open', pending_owner_telegram_id=NULL, proposed_at=NULL,
-             version=version+1, updated_at=now() WHERE id=$1`,
+          `UPDATE care_areas
+              SET status = CASE WHEN owner_telegram_id IS NULL THEN 'open' ELSE 'accepted' END,
+                  pending_owner_telegram_id=NULL, proposed_at=NULL,
+                  version=version+1, updated_at=now() WHERE id=$1`,
           [locked.id],
         );
       } else if (input.action === "release") {

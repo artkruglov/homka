@@ -178,6 +178,12 @@ const POST_V0101_MIGRATIONS = [
   "145_coach_initiative.sql",
   "146_coach_touch_claim.sql",
   "147_hitl_consumed_callback_query.sql",
+  "148_care_area_proposal_keeps_owner.sql",
+  "149_family_relation.sql",
+  "150_partner_alert.sql",
+  "151_partner_alert_claim.sql",
+  "152_weekly_review.sql",
+  "153_weekly_review_claim.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

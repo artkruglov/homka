@@ -45,6 +45,7 @@ const LONG_ANSWER_SUMMARY = "Полный ответ";
  * (`task-board.ts`), модель пересылает доску как есть; до человека маркер не доходит.
  */
 export const TELEGRAM_KEEP_OPEN_DIRECTIVE = "<telegram-keep-open>";
+const TELEGRAM_KEEP_OPEN_PATTERN = /^[ \t]*<telegram-keep-open>[ \t]*\r?\n?/u;
 
 function usesSupportedRichBlockFormatting(markdown: string): boolean {
   return RICH_BLOCK_PATTERN.test(markdown) || GFM_TABLE_DELIMITER_PATTERN.test(markdown);
@@ -135,8 +136,10 @@ export function formatTelegramFinalPresentation(
 
   // The length policy applies to each authored message on its own, so a long main answer still
   // collapses without swallowing the asides its author separated from it.
-  const present = (part: string) => part.includes(TELEGRAM_KEEP_OPEN_DIRECTIVE)
-    ? part.split(TELEGRAM_KEEP_OPEN_DIRECTIVE).join("").trim()
+  // Директива действует только отдельной первой строкой части: иначе процитированное название
+  // дела с этим текстом отменяло бы кат всему сообщению.
+  const present = (part: string) => TELEGRAM_KEEP_OPEN_PATTERN.test(part)
+    ? part.replace(TELEGRAM_KEEP_OPEN_PATTERN, "").trim()
     : collapseLongAnswer(part);
   return [
     ...formatPart(present(main), "immediate"),

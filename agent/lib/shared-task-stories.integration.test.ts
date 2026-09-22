@@ -108,7 +108,7 @@ suite('planner user stories',()=>{
     await expect(tasks.execute(owner,{action:'complete',id:task.id,version:task.version+1} as never,'stale')).rejects.toThrow(/AGENT_TASK_VERSION_CONFLICT/);
     expect((await tasks.execute(owner,{action:'complete',id:task.id,version:task.version} as never,'fresh')).task?.status).toBe('completed');
   });
-  it('T05: a task closed by mistake returns to work with its history, without restarting old signals',async()=>{
+  it('T05: a task closed by mistake returns to work with its history and its future signal, never an old one',async()=>{
     const task=await makeTask(owner,'Сканировать документы');
     const auth={familyId:owner.familyId,userId:owner.userId!,role:'owner' as const,telegramChatId:owner.telegramUserId!,telegramChatType:'private' as const,
       groupId:null,groupType:null,forumTopicId:null,messageThreadId:null};
@@ -120,6 +120,11 @@ suite('planner user stories',()=>{
     expect(reopened).toMatchObject({id:task.id,status:'accepted'});
     expect((await database().query("SELECT action FROM shared_task_versions WHERE task_id=$1 ORDER BY version",[task.id])).rows.map(r=>r.action))
       .toEqual(['complete','reopen']);
+    // Сигнал на завтра возвращается вместе с делом, прошедший остаётся на паузе.
+    expect((await database().query("SELECT status FROM reminders WHERE shared_task_id=$1",[task.id])).rows[0].status).toBe('active');
+    await tasks.execute(owner,{action:'batch',items:[{action:'complete',id:task.id}]} as never,'close-again');
+    await database().query("UPDATE reminders SET available_at=now()-interval '1 day' WHERE shared_task_id=$1",[task.id]);
+    await tasks.execute(owner,{action:'reopen',id:task.id} as never,'reopen-past');
     expect((await database().query("SELECT status FROM reminders WHERE shared_task_id=$1",[task.id])).rows[0].status).toBe('paused');
     expect((await tasks.execute(owner,{action:'list'},'read')).tasks!.map(t=>t.id)).toContain(task.id);
   });

@@ -32,11 +32,14 @@ function auth(person: TwoSpaceFixture["owner"], group = true): MemoryAuthorizati
   };
 }
 
-async function spouseRef(): Promise<string> {
+async function participantRef(name: string, reader = fixture.owner): Promise<string> {
   const participants = (await sharedTaskRepository.execute(
-    auth(fixture.owner), { action: "participants" }, "read")).participants!;
-  return participants.find((person) => person.name === "Супруга")!.participantRef;
+    auth(reader), { action: "participants" }, "read")).participants!;
+  return participants.find((person) => person.name === name)!.participantRef;
 }
+
+const spouseRef = () => participantRef("Супруга");
+const ownerRef = () => participantRef("Владелец", fixture.spouse);
 
 dbDescribe("care areas", () => {
   beforeEach(async () => {
@@ -116,6 +119,24 @@ dbDescribe("care areas", () => {
     const accepted = (await areas.execute(auth(fixture.spouse),
       { action: "accept", id: created.id, version: proposed.version })).area!;
     expect(accepted).toMatchObject({ owner: "Супруга", pendingOwner: null, status: "accepted" });
+  });
+
+  it("keeps the current owner responsible until a handover is accepted", async () => {
+    // «До согласия отвечаю я»: раньше предложение сразу снимало хозяина, и отказ оставлял область
+    // вообще без ответственного.
+    const created = (await areas.execute(auth(fixture.owner), { action: "create", title: "Документы" })).area!;
+    const offered = (await areas.execute(auth(fixture.owner),
+      { action: "propose", id: created.id, ownerRef: await spouseRef(), version: created.version })).area!;
+    const taken = (await areas.execute(auth(fixture.spouse),
+      { action: "accept", id: created.id, version: offered.version })).area!;
+
+    const handover = (await areas.execute(auth(fixture.spouse),
+      { action: "propose", id: created.id, ownerRef: await ownerRef(), version: taken.version })).area!;
+    expect(handover).toMatchObject({ owner: "Супруга", pendingOwner: "Владелец", status: "proposed" });
+
+    const declined = (await areas.execute(auth(fixture.owner),
+      { action: "decline", id: created.id, version: handover.version })).area!;
+    expect(declined).toMatchObject({ owner: "Супруга", pendingOwner: null, status: "accepted" });
   });
 
   it("returns a released area to nobody instead of handing it on", async () => {

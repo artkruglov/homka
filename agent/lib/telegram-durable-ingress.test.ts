@@ -188,6 +188,47 @@ describe("createTelegramDurableIngress", () => {
     );
   });
 
+  it("keeps an unrecognizable group voice message instead of failing its update", async () => {
+    // Голос в группе расшифровывается ради адресации. Смех или музыка не речь, и раньше это
+    // роняло update: сообщение не попадало даже в журнал чата.
+    const storage = repository();
+    const transcribeVoice = vi.fn().mockResolvedValue("   ");
+    const dispatch = vi.fn().mockResolvedValue({
+      getEventStream: async () => new ReadableStream({
+        start(controller) { controller.enqueue({ type: "session.waiting" }); },
+      }),
+      id: "session-1",
+    });
+    const raw = voicePayload();
+    (raw.message as { chat: { type: string } }).chat.type = "supergroup";
+    (storage.claim.payload.message as { chat: { type: string } }).chat.type = "supergroup";
+    const update = parseTelegramUpdate(raw);
+    if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
+    let backgroundTask: Promise<unknown> | undefined;
+    const handle = createTelegramDurableIngress({
+      acceptMedia: vi.fn().mockResolvedValue(true),
+      authorizeVoice: vi.fn().mockResolvedValue(true),
+      botUsername: "osinara_bot",
+      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
+      leaseMilliseconds: 60_000,
+      repository: storage.value,
+      requestSessionRotation: vi.fn(),
+      transcribeVoice,
+    });
+
+    await handle({
+      dispatch, raw, update,
+      waitUntil(task) { backgroundTask = task; },
+    } as TelegramVerifiedUpdateContext);
+    await backgroundTask;
+
+    expect(transcribeVoice).toHaveBeenCalledTimes(1);
+    expect(storage.value.saveVoiceTranscript).not.toHaveBeenCalled();
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls[0]?.[0].message.text ?? "").toBe("");
+  });
+
   it("does not let an old session.waiting complete a newly dispatched turn", async () => {
     const storage = repository();
     storage.value.sessionEventStreamCursor.mockResolvedValue(2);

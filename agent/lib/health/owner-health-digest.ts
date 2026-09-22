@@ -83,13 +83,21 @@ export function formatOwnerHealthDigest(report: OwnerHealthReport, balance: Deep
   const breakdown = report.memoryWritten.map((entry) => `${entry.scope} ${entry.kind} ${entry.count}`).join(", ");
   const memory = written === 0 ? "Память: новых записей нет." : `Память: +${written} (${breakdown}).`;
   const header = lines.length === 0 ? "Сводка за сутки: сбоев нет." : "Сводка за сутки.";
+  // Раз в неделю видно, вышло ли что-то из практик: иначе о пользе снова судят по ощущениям.
+  const weekly = report.practices === null ? [] : [
+    `За неделю: касаний коуча ${report.practices.sent.coach} (ответов ${report.practices.answered.coach}),` +
+    ` уведомлений ${report.practices.sent.partnerAlert} (ответов ${report.practices.answered.partnerAlert}),` +
+    ` обзоров ${report.practices.sent.weeklyReview} (ответов ${report.practices.answered.weeklyReview}).`,
+    `Появилось за неделю: традиций ${report.practices.newRituals}, идей ${report.practices.newIdeas},` +
+    ` областей заботы ${report.practices.newCareAreas}; закрыто дел ${report.practices.closedTasks}.`,
+  ];
   // Расход и здоровый баланс это справка: они не превращают тихий день в день со сбоями.
   const spend = formatModelSpend(report.modelSpend);
   const information = [
     ...(spend === null ? [] : [spend]),
     ...(balanceLine !== null && !balanceLine.warning ? [balanceLine.text] : []),
   ];
-  return [header, ...lines, ...information, memory].join("\n");
+  return [header, ...lines, ...information, memory, ...weekly].join("\n");
 }
 
 interface OwnerHealthDigestDependencies {

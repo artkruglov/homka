@@ -136,19 +136,19 @@ export async function recordProactiveDelivery(
         content_text, scheduled_for, delivered_at, telegram_chat_id,
         message_thread_id, telegram_message_id, space_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-             CASE $5::proactive_delivery_source_kind
-               WHEN 'reminder' THEN (SELECT space_id FROM reminders WHERE id = $6::uuid)
-               WHEN 'agent_schedule' THEN (
+             CASE
+               WHEN $5::proactive_delivery_source_kind = 'reminder'
+                 THEN (SELECT space_id FROM reminders WHERE id = $6::uuid)
+               WHEN $5::proactive_delivery_source_kind = 'agent_schedule' THEN (
                  SELECT schedule.space_id FROM agent_schedules AS schedule
                    JOIN agent_schedule_runs AS run ON run.schedule_id = schedule.id
                   WHERE run.id = $6::uuid)
-               -- Бот начал личный разговор сам: вопрос живёт в личном пространстве адресата.
-               WHEN 'daily_overview' THEN (SELECT id FROM spaces WHERE family_id = $1
-                 AND kind = 'personal' AND owner_user_id = $2 AND state = 'active'
-                 ORDER BY created_at LIMIT 1)
-               WHEN 'coach' THEN (SELECT id FROM spaces WHERE family_id = $1
-                 AND kind = 'personal' AND owner_user_id = $2 AND state = 'active'
-                 ORDER BY created_at LIMIT 1)
+               -- Бот начал личный разговор сам: сказанное живёт в личном пространстве адресата.
+               WHEN $5::proactive_delivery_source_kind
+                 IN ('daily_overview', 'coach', 'partner_alert', 'weekly_review')
+                 THEN (SELECT id FROM spaces WHERE family_id = $1
+                        AND kind = 'personal' AND owner_user_id = $2 AND state = 'active'
+                      ORDER BY created_at LIMIT 1)
              END)
      ON CONFLICT (source_kind, source_id, telegram_message_id) DO NOTHING`,
     [

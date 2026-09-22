@@ -55,13 +55,44 @@ describeWithDatabase("familyRepository invitations", () => {
   beforeEach(async () => {
     // Integration tests own the disposable database and reset every domain table between cases.
     await database().query(
-      `TRUNCATE invitations, memory_items_all,
+      `TRUNCATE invitations, memory_items_all, shared_task_participants,
          telegram_groups, family_memberships, users, families CASCADE`,
     );
   });
 
   afterAll(async () => {
     await closeDatabase();
+  });
+
+  it("labels who is who without giving anyone new rights", async () => {
+    // Коуч спрашивает про традицию вдвоём партнёра, а маме этот вопрос не адресован вовсе.
+    const owner = await createOwner("relations");
+    const member = await database().query<{ id: string }>(
+      "INSERT INTO users (telegram_user_id, display_name) VALUES ('relation-member', 'Супруга') RETURNING id",
+    );
+    await database().query(
+      "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'member')",
+      [owner.familyId, member.rows[0]!.id],
+    );
+    const participant = await database().query<{ id: string }>(
+      `INSERT INTO shared_task_participants(family_id, group_id, telegram_user_id, display_name)
+       VALUES ($1, NULL, 'relation-member', 'Супруга') RETURNING id`,
+      [owner.familyId],
+    );
+
+    await expect(familyRepository.setRelation({
+      familyId: owner.familyId, ownerUserId: owner.ownerId,
+      participantRef: participant.rows[0]!.id, relation: "partner",
+    })).resolves.toEqual({ name: "Супруга", relation: "partner" });
+    expect((await database().query(
+      "SELECT relation, role FROM family_memberships WHERE user_id = $1", [member.rows[0]!.id],
+    )).rows[0]).toEqual({ relation: "partner", role: "member" });
+
+    // Не владелец пометку не ставит, и сам себе владелец её тоже не ставит.
+    await expect(familyRepository.setRelation({
+      familyId: owner.familyId, ownerUserId: member.rows[0]!.id,
+      participantRef: participant.rows[0]!.id, relation: "parent",
+    })).rejects.toThrow(/AGENT_FAMILY_RELATION_INVALID/u);
   });
 
   it("keeps a claimant pending until the same-family owner approves", async () => {

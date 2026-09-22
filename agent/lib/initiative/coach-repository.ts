@@ -3,7 +3,7 @@
  *
  * Экспорт:
  * - `CoachRecipient`: человек с личным чатом, его правило инициативы и факты для повода.
- * - `coachRepository`: адресаты, заявка на сутки, её возврат.
+ * - `coachRepository`: адресаты и заявка на сутки.
  *
  * Факты это только структура: окна личного времени, традиции, предложения партнёра и прошлые
  * касания. Текст переписки, память и дела коуч не читает. Пишет только тем, кто сам писал боту
@@ -11,35 +11,21 @@
  */
 import { database } from "../database.js";
 import type { CoachFacts, CoachReason, CoachTouch } from "./coach.js";
-import type { InitiativeSettings, InitiativeState } from "./initiative-policy.js";
+import {
+  INITIATIVE_DEFAULT_DAILY_LIMIT,
+  initiativeRecipientQuery,
+  toInitiativeRecipient,
+  type InitiativeRecipient,
+  type InitiativeRecipientRow,
+} from "./initiative-audience.js";
 
-const DEFAULT_DAILY_LIMIT = 3;
 const QUIET_RITUAL_DAYS = 14;
 
-export interface CoachRecipient {
-  readonly familyId: string;
-  readonly userId: string;
-  readonly telegramUserId: string;
-  readonly settings: InitiativeSettings;
-  readonly state: InitiativeState;
+export interface CoachRecipient extends InitiativeRecipient {
   readonly facts: CoachFacts;
 }
 
-interface RecipientRow {
-  coach_enabled: boolean | null;
-  daily_limit: number;
-  enabled: boolean;
-  family_id: string;
-  quiet_end: string | null;
-  quiet_start: string | null;
-  sent_today: string;
-  telegram_user_id: string;
-  timezone: string;
-  unanswered: string;
-  user_id: string;
-}
-
-async function factsFor(row: RecipientRow, now: Date): Promise<CoachFacts> {
+async function factsFor(row: InitiativeRecipientRow, now: Date): Promise<CoachFacts> {
   const db = database();
   const params = [row.family_id, row.user_id, row.telegram_user_id, now, QUIET_RITUAL_DAYS];
   const [touches, decision, ritual, windows, rituals] = await Promise.all([
@@ -99,6 +85,7 @@ async function factsFor(row: RecipientRow, now: Date): Promise<CoachFacts> {
   }
   return {
     enabled: row.coach_enabled,
+    relation: row.relation ?? null,
     familyRituals: Number(rituals.rows[0]?.count ?? 0),
     invited: lastByReason.invite !== undefined,
     lastByReason,
@@ -107,59 +94,21 @@ async function factsFor(row: RecipientRow, now: Date): Promise<CoachFacts> {
     personalWindows: Number(windows.rows[0]?.count ?? 0),
     quietRitual: ritual.rows[0] ?? null,
     touchesLastWeek,
+    weeklyReviewEnabled: row.weekly_review_enabled === true,
   };
 }
 
 export const coachRepository = {
-  /** Люди с подтверждённым личным чатом; выключенный коуч отсекается сразу, без чтения фактов. */
+  /** Люди с личной сессией; выключенный коуч отсекается сразу, без чтения фактов. */
   async recipients(now: Date): Promise<CoachRecipient[]> {
-    const { rows } = await database().query<RecipientRow>(
-      `SELECT DISTINCT ON (membership.family_id, person.id)
-              membership.family_id, person.id AS user_id, person.telegram_user_id,
-              COALESCE(settings.timezone, 'UTC') AS timezone,
-              to_char(settings.quiet_start, 'HH24:MI') AS quiet_start,
-              to_char(settings.quiet_end, 'HH24:MI') AS quiet_end,
-              COALESCE(settings.initiative_enabled, true) AS enabled,
-              COALESCE(settings.initiative_daily_limit, $2::smallint) AS daily_limit,
-              settings.coach_enabled,
-              (SELECT count(*) FROM initiative_messages AS sent
-                WHERE sent.user_id = person.id
-                  AND sent.sent_on = ($1::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC'))::date
-              )::text AS sent_today,
-              (SELECT count(*) FROM initiative_messages AS sent
-                WHERE sent.user_id = person.id AND sent.answered_at IS NULL)::text AS unanswered
-         FROM family_memberships AS membership
-         JOIN users AS person ON person.id = membership.user_id
-         JOIN application_conversations AS chat ON chat.family_id = membership.family_id
-          AND chat.owner_user_id = person.id AND chat.scope = 'personal'
-          AND chat.telegram_group_id IS NULL AND chat.telegram_chat_id = person.telegram_user_id
-         LEFT JOIN user_notification_settings AS settings ON settings.user_id = person.id
-        WHERE person.telegram_user_id IS NOT NULL
-          AND settings.coach_enabled IS DISTINCT FROM false
-          -- Строку личного чата база заводит каждому участнику сама; написать первым Telegram даёт
-          -- только тому, кто сам начал разговор, а его след это личная сессия с ботом.
-          AND EXISTS (SELECT 1 FROM conversation_sessions AS session
-                       WHERE session.family_id = membership.family_id AND session.scope = 'personal'
-                         AND session.owner_user_id = person.id AND session.kind = 'canonical')
-        ORDER BY membership.family_id, person.id`,
-      [now, DEFAULT_DAILY_LIMIT],
+    const { rows } = await database().query<InitiativeRecipientRow>(
+      initiativeRecipientQuery("AND settings.coach_enabled IS DISTINCT FROM false"),
+      [now, INITIATIVE_DEFAULT_DAILY_LIMIT],
     );
     const recipients: CoachRecipient[] = [];
     for (const row of rows) {
-      recipients.push({
-        facts: await factsFor(row, now),
-        familyId: row.family_id,
-        settings: {
-          dailyLimit: row.daily_limit,
-          enabled: row.enabled,
-          quietEnd: row.quiet_end,
-          quietStart: row.quiet_start,
-          timezone: row.timezone,
-        },
-        state: { sentToday: Number(row.sent_today), unanswered: Number(row.unanswered) },
-        telegramUserId: row.telegram_user_id,
-        userId: row.user_id,
-      });
+      const recipient = toInitiativeRecipient(row);
+      recipients.push({ ...recipient, facts: await factsFor(row, now) });
     }
     return recipients;
   },
@@ -175,7 +124,4 @@ export const coachRepository = {
     return inserted.rows[0]?.delivery_ref ?? null;
   },
 
-  async release(deliveryRef: string): Promise<void> {
-    await database().query("DELETE FROM initiative_messages WHERE delivery_ref = $1 AND kind = 'coach'", [deliveryRef]);
-  },
 };

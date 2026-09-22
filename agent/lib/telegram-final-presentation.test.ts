@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
 import { formatTelegramFinalPresentation, TELEGRAM_KEEP_OPEN_DIRECTIVE } from "./telegram-final-presentation.js";
 import { TELEGRAM_ASIDE_DIRECTIVE } from "./telegram-authored-split.js";
 
@@ -236,5 +237,21 @@ describe("a task board kept open", () => {
 
   it("still folds the same long text when the model wrote it without the marker", () => {
     expect(formatTelegramFinalPresentation(board).map((chunk) => chunk.text).join("\n")).toContain("Полный ответ");
+  });
+});
+
+describe("keep-open directive", () => {
+  it("opens only for the directive on its own first line, not for a quoted title", () => {
+    const quoted = `Дело называется <telegram-keep-open> и вот что по нему: ${"строка. ".repeat(120)}`;
+
+    const delivered = formatTelegramFinalPresentation(quoted).map((chunk) => chunk.text).join("\n");
+
+    expect(delivered).toContain("Полный ответ");
+    expect(formatTelegramFinalPresentation(`<telegram-keep-open>\n${"строка. ".repeat(120)}`)
+      .map((chunk) => chunk.text).join("\n")).not.toContain("Полный ответ");
+  });
+
+  it("never stores the directive in the durable projection", () => {
+    expect(stripTelegramAsideDirectives("<telegram-keep-open>\nДоска")).toBe("Доска");
   });
 });

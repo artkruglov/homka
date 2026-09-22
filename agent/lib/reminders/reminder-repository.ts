@@ -59,6 +59,8 @@ export interface ReminderUpdateInput {
 export interface NotificationSettingsView {
   /** `null`: приглашения коуча не было или на него не ответили. */
   coachEnabled: boolean | null;
+  /** `null`: про недельный обзор человека ещё не спрашивали. */
+  weeklyReviewEnabled: boolean | null;
   initiativeDailyLimit: number;
   initiativeEnabled: boolean;
   quietEnd: string | null;
@@ -119,16 +121,17 @@ export const reminderRepository = {
     try {
       await client.query("BEGIN");
       await requireCurrentMembership(client, auth);
-      const updated = await client.query(
-        "UPDATE user_notification_settings SET coach_enabled = $2, updated_at = now() WHERE user_id = $1",
-        [auth.userId, enabled],
+      // Строки настроек у человека может не быть вовсе: приглашение коуча уходит именно таким
+      // людям, и 22 сентября 2026 у них падало и «да», и «без коуча». Пояс берётся тот же, что у
+      // штампов времени: свой, иначе владельца семьи, иначе UTC.
+      await client.query(
+        `INSERT INTO user_notification_settings(user_id, timezone, coach_enabled)
+         VALUES ($1, COALESCE((SELECT settings.timezone FROM user_notification_settings AS settings
+                                 JOIN family_memberships AS membership ON membership.user_id = settings.user_id
+                                WHERE membership.family_id = $3 AND membership.role = 'owner'), 'UTC'), $2)
+         ON CONFLICT (user_id) DO UPDATE SET coach_enabled = EXCLUDED.coach_enabled, updated_at = now()`,
+        [auth.userId, enabled, auth.familyId],
       );
-      if (updated.rowCount !== 1) {
-        throw new AppError(
-          "AGENT_NOTIFICATION_SETTINGS_REQUIRED",
-          "Сначала нужен часовой пояс: без него я не пойму, когда уместно писать",
-        );
-      }
       await client.query(
         `INSERT INTO audit_events (family_id, actor_user_id, event_type, metadata)
          VALUES ($1, $2, 'notifications.coach', jsonb_build_object('enabled', $3::boolean))`,
@@ -145,6 +148,42 @@ export const reminderRepository = {
     return await this.getNotificationSettings(auth);
   },
 
+  /**
+   * Согласие на недельный обзор. Пишется так же, как согласие коуча: строки настроек у человека
+   * может не быть вовсе, а без часового пояса воскресный вечер считался бы в UTC и приходил ночью.
+   */
+  async setWeeklyReview(auth: ReminderAuthorization, enabled: boolean): Promise<NotificationSettingsView> {
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      await requireCurrentMembership(client, auth);
+      await client.query(
+        `INSERT INTO user_notification_settings(user_id, timezone, weekly_review_enabled)
+         VALUES ($1, COALESCE((SELECT settings.timezone FROM user_notification_settings AS settings
+                                 JOIN family_memberships AS membership ON membership.user_id = settings.user_id
+                                WHERE membership.family_id = $3 AND membership.role = 'owner'), 'UTC'), $2)
+         ON CONFLICT (user_id) DO UPDATE
+         SET weekly_review_enabled = EXCLUDED.weekly_review_enabled, updated_at = now()`,
+        [auth.userId, enabled, auth.familyId],
+      );
+      await client.query(
+        `INSERT INTO audit_events (family_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, 'notifications.weekly_review', jsonb_build_object('enabled', $3::boolean))`,
+        [auth.familyId, auth.userId, enabled],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    console.info(JSON.stringify({
+      code: "AGENT_WEEKLY_REVIEW_CONSENT_CHANGED", enabled, familyId: auth.familyId,
+    }));
+    return await this.getNotificationSettings(auth);
+  },
+
   async getNotificationSettings(auth: ReminderAuthorization): Promise<NotificationSettingsView> {
     const result = await database().query<{
       coach_enabled: boolean | null;
@@ -153,11 +192,12 @@ export const reminderRepository = {
       quiet_end: string | null;
       quiet_start: string | null;
       timezone: string;
+      weekly_review_enabled: boolean | null;
     }>(
       `SELECT to_char(settings.quiet_end, 'HH24:MI') AS quiet_end,
               to_char(settings.quiet_start, 'HH24:MI') AS quiet_start,
               settings.timezone, settings.initiative_enabled, settings.initiative_daily_limit,
-              settings.coach_enabled
+              settings.coach_enabled, settings.weekly_review_enabled
        FROM user_notification_settings AS settings
        JOIN family_memberships AS membership ON membership.user_id = settings.user_id
        WHERE settings.user_id = $1 AND membership.family_id = $2`,
@@ -177,6 +217,7 @@ export const reminderRepository = {
       quietEnd: settings.quiet_end,
       quietStart: settings.quiet_start,
       timezone: settings.timezone,
+      weeklyReviewEnabled: settings.weekly_review_enabled,
     };
   },
 

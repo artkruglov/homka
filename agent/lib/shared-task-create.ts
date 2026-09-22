@@ -56,14 +56,14 @@ export async function createTask(
     }
   }
   await requireTaskRecipientSpace(client,auth,spaceId,assignee);
-  // Личное время чужое: поставить на него дело нельзя, и отказ называет окно, чтобы не
-  // пришлось объясняться самому человеку.
+  // Личное время чужое: поставить на него дело нельзя. Название окна другому участнику не
+  // показывается — по B02 о человеке можно сообщить только занятость, а не чем он занят.
   if (assignee !== null && assignee !== auth.telegramUserId && input.dueAt) {
-    const busy = await personalTimeRepository.conflictFor(assignee, new Date(input.dueAt));
+    const busy = await personalTimeRepository.conflictFor(assignee, auth.familyId, new Date(input.dueAt));
     if (busy !== null) {
       throw new AppError(
         "AGENT_TASK_PERSONAL_TIME",
-        `Это время занято: «${busy}». Выберите другое или спросите, когда удобно`,
+        "Это время занято личным временем человека. Выберите другое или спросите, когда удобно",
       );
     }
   }

@@ -92,7 +92,8 @@ export const sharedTaskInput = sharedTaskFields.extend({
   checkSharedTaskFields(v, ctx);
   if (v.action !== "batch") return;
   if (!v.items) ctx.addIssue({code:"custom",message:"Для batch нужен список items"});
-  const ids = (v.items ?? []).flatMap((item) => item.id ? [item.id] : []);
+  // Регистр uuid схема принимает любой, поэтому сравниваются приведённые к нижнему.
+  const ids = (v.items ?? []).flatMap((item) => item.id ? [item.id.toLowerCase()] : []);
   // Два действия над одним делом в одном пакете зависели бы от порядка исполнения.
   if (new Set(ids).size !== ids.length) ctx.addIssue({code:"custom",message:"Одно дело встречается в пакете дважды"});
 });

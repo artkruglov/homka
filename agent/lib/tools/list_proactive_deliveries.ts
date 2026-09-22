@@ -56,7 +56,7 @@ export default defineTool({
   description: [
     "Показать ранее доставленные в текущий чат напоминания и результаты агентных расписаний.",
     "Используй, когда пользователь ссылается на старый дайджест, отчёт, сводку или уведомление, которого уже нет в текущем контексте.",
-    "query ищет по заголовку и тексту; sourceKind ограничивает результаты типом agent_schedule, reminder, daily_overview (утренний обзор) или coach (вопрос коуча).",
+    "query ищет по заголовку и тексту; sourceKind ограничивает результаты типом agent_schedule, reminder, daily_overview (утренний обзор), coach (вопрос коуча), partner_alert (что ждёт ответа) или weekly_review (обзор недели).",
     "deliveredAfter и deliveredBefore задают включительный период по времени доставки в ISO datetime.",
     "Результат: {items,nextCursor}; каждый item содержит отдельные поля deliveryId и sourceId. Для следующей страницы передай nextCursor без изменений.",
   ].join(" "),
@@ -67,7 +67,7 @@ export default defineTool({
     limit: z.number().int().min(1).max(PROACTIVE_DELIVERY_HISTORY_MAX_LIMIT)
       .default(PROACTIVE_DELIVERY_HISTORY_DEFAULT_LIMIT),
     query: z.string().trim().min(1).max(200).optional(),
-    sourceKind: z.enum(["agent_schedule", "coach", "daily_overview", "reminder"]).optional(),
+    sourceKind: z.enum(["agent_schedule", "coach", "daily_overview", "partner_alert", "reminder", "weekly_review"]).optional(),
   }).strict(),
   async execute(input, ctx) {
     return await proactiveDeliveryRepository.list({

@@ -6,9 +6,10 @@
  *
  * Порядок: общее правило инициативы (выключатель, тихие часы, пауза после молчания, предел
  * суток), личное время, повод, заявка, отправка, запись в журнал доставок. Повода нет — нет и
- * сообщения: потолок касаний не расписание. Отказ Telegram возвращает заявку, неизвестный исход
- * повтора не получает. Сообщение, ушедшее без записи в журнал, остаётся отправленным: сбой записи
- * только логируется.
+ * сообщения: потолок касаний не расписание. Определённый отказ Telegram (бот заблокирован)
+ * заявку не возвращает: иначе каждый десятиминутный тик пробовал бы снова, шестьдесят раз в
+ * сутки. Неизвестный исход повтора тоже не получает. Сообщение, ушедшее без записи в журнал,
+ * остаётся отправленным: сбой записи только логируется.
  */
 import { MemoryReviewOwnerAlertTransportError } from "../memory-review/memory-review-owner-alert-transport.js";
 import { chooseCoachTouch, type CoachTouch } from "./coach.js";
@@ -20,7 +21,6 @@ export interface CoachDispatcherDependencies {
   recipients(): Promise<CoachRecipient[]>;
   personalTime(recipient: CoachRecipient, now: Date): Promise<string | null>;
   claim(recipient: CoachRecipient, localDate: string, touch: CoachTouch, now: Date): Promise<string | null>;
-  release(deliveryRef: string): Promise<void>;
   send(input: { chatId: string; text: string }): Promise<string>;
   record(delivery: InitiativeDelivery): Promise<void>;
 }
@@ -55,7 +55,6 @@ export function createCoachDispatcher(dependencies: CoachDispatcherDependencies)
         messageId = await dependencies.send({ chatId: recipient.telegramUserId, text: touch.text });
       } catch (error) {
         const refused = error instanceof MemoryReviewOwnerAlertTransportError;
-        if (refused) await dependencies.release(deliveryRef);
         console.error(JSON.stringify({
           code: refused ? "AGENT_COACH_TOUCH_FAILED" : "AGENT_COACH_TOUCH_AMBIGUOUS",
           error: error instanceof Error ? error.message : String(error),

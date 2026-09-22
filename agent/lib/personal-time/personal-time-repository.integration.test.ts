@@ -69,6 +69,10 @@ dbDescribe("personal time", () => {
     await expect(sharedTaskRepository.execute(auth(fixture.owner, true),
       { action: "create", assigneeRef: spouseRef, dueAt: inside, title: "Забрать посылку" },
       randomUUID())).rejects.toThrow(/AGENT_TASK_PERSONAL_TIME/u);
+    // Отказ сообщает занятость, но не чем человек занят: название окна остаётся его делом.
+    await expect(sharedTaskRepository.execute(auth(fixture.owner, true),
+      { action: "create", assigneeRef: spouseRef, dueAt: inside, title: "Забрать посылку" },
+      randomUUID())).rejects.not.toThrow(/Зал/u);
 
     // Своё дело на своё время человек ставит сам: окно защищает от чужих планов, не от его.
     await expect(sharedTaskRepository.execute(auth(fixture.spouse),

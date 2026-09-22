@@ -2,7 +2,8 @@
  * Данные утреннего обзора: кому, что и один раз в сутки.
  *
  * Экспорт:
- * - `dailyOverviewRepository`: адресаты, содержание дня, заявка на сутки и её возврат.
+ * - `TaskOwner`: чьи дела читаются; недельному обзору хватает тех же полей.
+ * - `dailyOverviewRepository`: адресаты, содержание дня и заявка на сутки.
  *
  * Содержание собирается тем же планировщиком, что отвечает человеку в чате, и с той же
  * авторизацией: область берётся из его выбора, а дела — по его личности. Второго пути к делам
@@ -53,6 +54,9 @@ async function overviewSpace(
   return space ? { policyVersion: space.policy_version, spaceId: space.id } : null;
 }
 
+/** Всё, что нужно для выборки дел по личности человека: область берётся из его же выбора. */
+export type TaskOwner = Pick<DailyOverviewRecipient, "familyId" | "settings" | "telegramUserId" | "userId">;
+
 export const dailyOverviewRepository = {
   /** Все, у кого есть личный чат: обзор дня это личное сообщение, а не общий текст в группу. */
   async recipients(now: Date): Promise<DailyOverviewRecipient[]> {
@@ -94,7 +98,11 @@ export const dailyOverviewRepository = {
     }));
   },
 
-  async overview(recipient: DailyOverviewRecipient): Promise<DailyOverview> {
+  /**
+   * Тип адресата сужен до того, что обзор действительно читает: недельный обзор собирает те же
+   * дела тем же путём и ничего не знает про `firstEver` утреннего сообщения.
+   */
+  async overview(recipient: TaskOwner): Promise<DailyOverview> {
     const client = await database().connect();
     let space: { policyVersion: number; spaceId: string } | null;
     try {
@@ -142,11 +150,4 @@ export const dailyOverviewRepository = {
     return inserted.rows[0]?.delivery_ref ?? null;
   },
 
-  async release(recipient: DailyOverviewRecipient, localDate: string): Promise<void> {
-    await database().query(
-      `DELETE FROM initiative_messages
-        WHERE user_id = $1 AND kind = 'suggestion' AND sent_on = $2::date`,
-      [recipient.userId, localDate],
-    );
-  },
 };

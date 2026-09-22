@@ -10,11 +10,15 @@ import { decisionInput,decisionStatus,type DecisionChoice,type DecisionInput } f
 interface Row {id:string;title:string;details:string|null;version:number;creator_user_id:string;partner_user_id:string;cancelled:boolean}
 function denied():never {throw new AppError("AGENT_DECISION_ACCESS_DENIED","Решение недоступно вам в этой области");}
 
-async function read(client:PoolClient,auth:MemoryAuthorization,spaceId:string|null,id:string,lock=false):Promise<Row>{
+async function read(client:PoolClient,auth:MemoryAuthorization,spaceId:string|null,id:string,lock=false,
+  personal=false):Promise<Row>{
+  // Отвечающий из лички назван в самом решении, поэтому область и чат его не ограничивают:
+  // проверка участника остаётся прежней.
   const row=(await client.query<Row>(`SELECT * FROM joint_decisions WHERE id=$1 AND family_id=$2
-    AND $3::uuid IN (creator_user_id,partner_user_id) AND space_id IS NOT DISTINCT FROM $4::uuid
-    AND ($4::uuid IS NOT NULL OR group_id IS NOT DISTINCT FROM $5::uuid) ${lock?'FOR UPDATE':'FOR SHARE'}`,
-  [id,auth.familyId,auth.userId,spaceId,auth.groupId])).rows[0];
+    AND $3::uuid IN (creator_user_id,partner_user_id)
+    AND ($6::boolean OR (space_id IS NOT DISTINCT FROM $4::uuid
+      AND ($4::uuid IS NOT NULL OR group_id IS NOT DISTINCT FROM $5::uuid))) ${lock?'FOR UPDATE':'FOR SHARE'}`,
+  [id,auth.familyId,auth.userId,spaceId,auth.groupId,personal])).rows[0];
   if(!row)denied();return row;
 }
 async function present(client:PoolClient,row:Row,actor:string){
@@ -38,20 +42,23 @@ export const jointDecisionRepository={
     try{
       await client.query("BEGIN");
       // Replies and voluntary feedback need read access; only creating a shared proposal needs write.
-      const audience=await decisionAudience(client,auth,input.action==='create');
+      const audience=await decisionAudience(client,auth,input.action==='create',
+        ['get','list','answer','feedback','withdraw_feedback'].includes(input.action));
       const actor=auth.userId!;
       if(input.action==='participants'){await client.query("COMMIT");return {participants:audience.participants};}
       if(input.action==='list'){
         const rows=(await client.query<Row>(`SELECT * FROM joint_decisions WHERE family_id=$1
-          AND $2::uuid IN (creator_user_id,partner_user_id) AND space_id IS NOT DISTINCT FROM $3::uuid
-          AND ($3::uuid IS NOT NULL OR group_id IS NOT DISTINCT FROM $4::uuid)
-          ORDER BY created_at DESC,id DESC LIMIT 51 FOR SHARE`,[auth.familyId,actor,audience.spaceId,auth.groupId])).rows;
+          AND $2::uuid IN (creator_user_id,partner_user_id)
+          AND ($5::boolean OR (space_id IS NOT DISTINCT FROM $3::uuid
+            AND ($3::uuid IS NOT NULL OR group_id IS NOT DISTINCT FROM $4::uuid)))
+          ORDER BY created_at DESC,id DESC LIMIT 51 FOR SHARE`,
+        [auth.familyId,actor,audience.spaceId,auth.groupId,audience.personalAnswer])).rows;
         const decisions=[];
         for(const row of rows.slice(0,50))decisions.push(await present(client,row,actor));
         await client.query("COMMIT");return {decisions,truncated:rows.length>50};
       }
       if(input.action==='get'){
-        const decision=await present(client,await read(client,auth,audience.spaceId,input.id!),actor);
+        const decision=await present(client,await read(client,auth,audience.spaceId,input.id!,false,audience.personalAnswer),actor);
         await client.query("COMMIT");return {decision};
       }
       if(!operationKey||operationKey.length>500)denied();
@@ -61,7 +68,7 @@ export const jointDecisionRepository={
         "SELECT decision_id,request_hash FROM joint_decision_operations WHERE family_id=$1 AND operation_key=$2",[auth.familyId,operationKey])).rows[0];
       if(previous){
         if(previous.request_hash!==hash)denied();
-        const decision=await present(client,await read(client,auth,audience.spaceId,previous.decision_id),actor);
+        const decision=await present(client,await read(client,auth,audience.spaceId,previous.decision_id,false,audience.personalAnswer),actor);
         await client.query("COMMIT");return {decision,replayed:true};
       }
       let id:string;
@@ -75,7 +82,7 @@ export const jointDecisionRepository={
         id=(await client.query<{id:string}>(`INSERT INTO joint_decisions(family_id,creator_user_id,partner_user_id,space_id,group_id,title,details)
           VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,[auth.familyId,actor,partner.id,audience.spaceId,auth.groupId,input.title,input.details??null])).rows[0]!.id;
       }else{
-        const row=await read(client,auth,audience.spaceId,input.id!,true);id=row.id;
+        const row=await read(client,auth,audience.spaceId,input.id!,true,audience.personalAnswer);id=row.id;
         if(row.version!==input.version)throw new AppError("AGENT_DECISION_VERSION_CONFLICT","Решение изменилось. Прочитайте его заново");
         if(input.action==='answer'){
           if(row.cancelled)throw new AppError("AGENT_DECISION_CANCELLED","Предложение отменено; для нового решения нужно новое предложение");
@@ -96,7 +103,7 @@ export const jointDecisionRepository={
       await client.query("INSERT INTO joint_decision_operations(family_id,operation_key,decision_id,request_hash) VALUES($1,$2,$3,$4)",[auth.familyId,operationKey,id,hash]);
       await client.query(`INSERT INTO audit_events(family_id,actor_user_id,event_type,subject_id)
         VALUES($1,$2,'joint_decision.'||$3::text,$4)`,[auth.familyId,actor,input.action,id]);
-      const decision=await present(client,await read(client,auth,audience.spaceId,id),actor);
+      const decision=await present(client,await read(client,auth,audience.spaceId,id,false,audience.personalAnswer),actor);
       await client.query("COMMIT");return {decision,replayed:false};
     }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
   },

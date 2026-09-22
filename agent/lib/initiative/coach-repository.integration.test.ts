@@ -71,6 +71,23 @@ dbDescribe("coach data", () => {
     await expect(coachRepository.recipients(NOW)).resolves.toEqual([]);
   });
 
+  it("uses the family owner's timezone for a person who has no settings of their own", async () => {
+    // Без этого окно 10-21 считалось в UTC и первый вопрос мог прийти ночью.
+    await privateChat(fixture.owner);
+    await privateChat(fixture.spouse);
+    await settings(fixture.owner, true);
+
+    const recipients = await coachRepository.recipients(NOW);
+
+    expect(recipients.find((person) => person.userId === fixture.spouse.userId)?.settings.timezone)
+      .toBe("UTC");
+    await database().query("UPDATE user_notification_settings SET timezone = 'Asia/Tokyo' WHERE user_id = $1",
+      [fixture.owner.userId]);
+    const withOwnerZone = await coachRepository.recipients(NOW);
+    expect(withOwnerZone.find((person) => person.userId === fixture.spouse.userId)?.settings.timezone)
+      .toBe("Asia/Tokyo");
+  });
+
   it("reads the reasons from structure: a partner's proposal, a quiet tradition, windows and traditions", async () => {
     await privateChat(fixture.owner);
     await settings(fixture.owner, true);
@@ -115,7 +132,7 @@ dbDescribe("coach data", () => {
     expect(after.touchesLastWeek).toBe(1);
   });
 
-  it("claims one touch a day, releases it, and the sent question reaches the next private turn", async () => {
+  it("claims one touch a day and the sent question reaches the next private turn", async () => {
     await privateChat(fixture.owner);
     await settings(fixture.owner, null);
     const recipient = (await ownerRecipient())!;
@@ -123,9 +140,9 @@ dbDescribe("coach data", () => {
 
     const ref = await coachRepository.claim(recipient, "2026-09-23", touch, NOW);
     expect(ref).toMatch(/^[0-9a-f-]{36}$/u);
+    // Заявка на сутки одна и назад не отдаётся: определённый отказ Telegram ждёт следующего дня.
     await expect(coachRepository.claim(recipient, "2026-09-23", touch, NOW)).resolves.toBeNull();
-    await coachRepository.release(ref!);
-    const again = await coachRepository.claim(recipient, "2026-09-23", touch, NOW);
+    const again = await coachRepository.claim(recipient, "2026-09-24", touch, NOW);
     expect(again).not.toBeNull();
     expect((await ownerRecipient())!.facts.invited).toBe(true);
 

@@ -1,6 +1,6 @@
 /**
  * Диспетчер коуча: общее правило инициативы и личное время важнее повода, заявка до отправки,
- * отказ Telegram возвращает заявку, отправленное касание попадает в журнал доставок.
+ * отказ Telegram заявку не возвращает, отправленное касание попадает в журнал доставок.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,9 +14,13 @@ const NOW = new Date("2026-09-23T12:00:00Z");
 const person: CoachRecipient = {
   facts: {
     enabled: null, familyRituals: 0, invited: false, lastByReason: {}, lastTouchAt: null,
-    openDecision: null, personalWindows: 0, quietRitual: null, touchesLastWeek: 0,
+    openDecision: null, personalWindows: 0, quietRitual: null, relation: "partner", touchesLastWeek: 0,
+    weeklyReviewEnabled: false,
   },
+  coachEnabled: true,
   familyId: "family-1",
+  weeklyReviewEnabled: false,
+  relation: "partner",
   settings: { dailyLimit: 3, enabled: true, quietEnd: "08:00", quietStart: "23:00", timezone: "Europe/Moscow" },
   state: { sentToday: 0, unanswered: 0 },
   telegramUserId: "101",
@@ -29,7 +33,6 @@ function dependencies(overrides: Partial<CoachDispatcherDependencies> = {}) {
     personalTime: vi.fn().mockResolvedValue(null),
     recipients: vi.fn().mockResolvedValue([person]),
     record: vi.fn().mockResolvedValue(undefined),
-    release: vi.fn().mockResolvedValue(undefined),
     send: vi.fn().mockResolvedValue("777"),
     ...overrides,
   };
@@ -79,17 +82,17 @@ describe("coach dispatcher", () => {
     expect(deps.send).not.toHaveBeenCalled();
   });
 
-  it("returns the claim on a Telegram refusal and keeps it when the outcome is unknown", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("keeps the day's claim after any failed delivery, so a blocked chat is not retried all day", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const refused = dependencies({
       send: vi.fn().mockRejectedValue(new MemoryReviewOwnerAlertTransportError("failed", "AGENT_X", "403")),
     });
-    await createCoachDispatcher(refused)(NOW);
-    expect(refused.release).toHaveBeenCalledWith("ref-1");
+    await expect(createCoachDispatcher(refused)(NOW)).resolves.toBe(0);
     expect(refused.record).not.toHaveBeenCalled();
+    expect(error.mock.calls[0]![0]).toContain("AGENT_COACH_TOUCH_FAILED");
 
     const lost = dependencies({ send: vi.fn().mockRejectedValue(new Error("socket hang up")) });
     await createCoachDispatcher(lost)(NOW);
-    expect(lost.release).not.toHaveBeenCalled();
+    expect(error.mock.calls.at(-1)![0]).toContain("AGENT_COACH_TOUCH_AMBIGUOUS");
   });
 });

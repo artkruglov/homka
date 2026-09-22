@@ -100,5 +100,8 @@ export function splitTelegramAuthoredParts(markdown: string): TelegramAuthoredPa
 }
 
 export function stripTelegramAsideDirectives(markdown: string): string {
-  return authoredParts(markdown).join("\n\n");
+  // Транспортные директивы не попадают в durable-проекцию: журнал хранит то, что прочитал человек.
+  return authoredParts(markdown)
+    .map((part) => part.replace(/^[ \t]*<telegram-keep-open>[ \t]*\r?\n?/u, ""))
+    .join("\n\n");
 }

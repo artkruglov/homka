@@ -75,4 +75,14 @@ export async function applyTaskStatus(
     // A send already in flight may finish; all future signals are paused.
     await client.query("UPDATE reminders SET status='paused',updated_at=now() WHERE shared_task_id=$1 AND status IN ('active','failed')",[task.id]);
   }
+  // Возвращённое в работу дело возвращает свой сигнал, но только тот, чьё время ещё впереди:
+  // старый сигнал закрытого дела остаётся на паузе (история T05), а будущий иначе молчал бы
+  // навсегда, хотя человек считает, что напоминание осталось.
+  if (action === "reopen") {
+    await client.query(
+      `UPDATE reminders SET status='active',updated_at=now()
+        WHERE shared_task_id=$1 AND status='paused' AND available_at > now()`,
+      [task.id],
+    );
+  }
 }

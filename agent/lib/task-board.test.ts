@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { formatTaskBoard, taskBoardReply, type BoardTask } from "./task-board.js";
+import {
+  formatTaskBoard, TASK_BOARD_MAX_CHARACTERS, taskBoardReply, type BoardTask,
+} from "./task-board.js";
 import { formatTelegramFinalPresentation } from "./telegram-final-presentation.js";
 
 const NOW = new Date("2026-09-22T06:00:00Z");
@@ -48,7 +50,31 @@ describe("task board", () => {
   it("marks headings bold for a model answer and keeps a title from breaking them", () => {
     const board = formatTaskBoard({ now: NOW, style: "rich", timezone: "UTC", tasks: [task("Купить **всё**", { listName: "Дом" })] })!;
 
-    expect(board).toContain("**Дом · 1**\n• Купить всё");
+    expect(board).toContain("**Дом · 1**\n• Купить \\*\\*всё\\*\\*");
+  });
+
+  it("never lets a task title become markup in someone else's board", () => {
+    const board = formatTaskBoard({
+      now: NOW, style: "rich", timezone: "UTC",
+      tasks: [task("[Смотри](https://evil.example) `код` **жирный** | конец", { listName: "Дом" })],
+    })!;
+
+    expect(board).toContain("\\[Смотри\\]\\(https://evil.example\\)");
+    expect(board).toContain("\\`код\\`");
+    expect(board).not.toMatch(/(^|[^\\])\*\*жирный/u);
+  });
+
+  it("keeps the board inside one Telegram message and says what it dropped", () => {
+    const tasks = Array.from({ length: 60 }, (_, index) =>
+      task(`Дело ${index + 1} ${"я".repeat(150)}`, { listName: `Список ${index}` }));
+
+    const board = formatTaskBoard({ now: NOW, style: "plain", tasks, timezone: "UTC" })!;
+
+    expect(board.length).toBeLessThanOrEqual(TASK_BOARD_MAX_CHARACTERS);
+    expect(board).toMatch(/…и ещё \d+ раздела, спроси о них отдельно/u);
+    expect(board).toContain("Открытых дел: 60");
+    // Длинное название обрезается, а не переносит доску за предел.
+    expect(board).toContain("…");
   });
 
   it("stays silent when nothing is open", () => {

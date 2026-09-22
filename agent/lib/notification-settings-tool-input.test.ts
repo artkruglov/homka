@@ -11,10 +11,11 @@ import type { ToolContext } from "eve/tools";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-const { configureNotifications, getNotificationSettings, setCoach } = vi.hoisted(() => ({
+const { configureNotifications, getNotificationSettings, setCoach, setWeeklyReview } = vi.hoisted(() => ({
   configureNotifications: vi.fn(),
   getNotificationSettings: vi.fn(),
   setCoach: vi.fn(),
+  setWeeklyReview: vi.fn(),
 }));
 
 vi.mock("./reminders/reminder-context.js", () => ({
@@ -24,7 +25,7 @@ vi.mock("./reminders/reminder-context.js", () => ({
   })),
 }));
 vi.mock("./reminders/reminder-repository.js", () => ({
-  reminderRepository: { configureNotifications, getNotificationSettings, setCoach },
+  reminderRepository: { configureNotifications, getNotificationSettings, setCoach, setWeeklyReview },
 }));
 
 import notificationSettings from "./tools/notification_settings.js";
@@ -53,7 +54,7 @@ describe("notification_settings model input", () => {
 
     expect(schema.type).toBe("object");
     expect(schema.required).toContain("action");
-    expect(schema.properties.action?.enum).toEqual(["get", "set", "coach"]);
+    expect(schema.properties.action?.enum).toEqual(["get", "set", "coach", "weekly_review"]);
   });
 
   it("turns the coach on or off without a button and only with an explicit value", async () => {
@@ -65,6 +66,21 @@ describe("notification_settings model input", () => {
     expect(setCoach).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1" }), true);
     expect(() => approvalFor({ action: "coach" })).toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*coachEnabled/u);
     expect(() => approvalFor({ action: "coach", coachEnabled: true, timezone: "UTC" }))
+      .toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID/u);
+  });
+
+  it("turns the weekly review on or off without a button and only with an explicit value", async () => {
+    setWeeklyReview.mockResolvedValue({ weeklyReviewEnabled: true });
+
+    expect(approvalFor({ action: "weekly_review", weeklyReviewEnabled: true })).toBe("not-applicable");
+    await expect(notificationSettings
+      .execute({ action: "weekly_review", weeklyReviewEnabled: false } as never, context))
+      .resolves.toEqual({ weeklyReviewEnabled: true });
+    expect(setWeeklyReview).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1" }), false);
+    expect(() => approvalFor({ action: "weekly_review" }))
+      .toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*weeklyReviewEnabled/u);
+    // Согласие на обзор не должно уметь заодно переписать коуча или часовой пояс.
+    expect(() => approvalFor({ action: "weekly_review", weeklyReviewEnabled: true, coachEnabled: true }))
       .toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID/u);
   });
 
@@ -114,6 +130,8 @@ describe("notification_settings model input", () => {
       "null",
       "ЧЧ:ММ",
       "Не угадывай",
+      '"action":"weekly_review"',
+      "weeklyReviewEnabled",
     ]) expect(description).toContain(fragment);
   });
 });

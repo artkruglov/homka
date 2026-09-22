@@ -93,6 +93,23 @@ describeWithDatabase("reminder repositories", () => {
     vi.unstubAllGlobals();
   });
 
+  it("turns the coach on for a person who has no settings row yet", async () => {
+    // Приглашение коуча уходит как раз тем, у кого настроек ещё нет: 22 сентября 2026 участница
+    // семьи не смогла ответить ни «да», ни «без коуча» — оба ответа падали на отсутствующей строке.
+    const fixture = await createFixture();
+    await reminderRepository.configureNotifications(privateAuth(fixture, "owner"), {
+      quietEnd: null, quietStart: null, timezone: "Europe/Moscow",
+    });
+
+    await expect(reminderRepository.setCoach(privateAuth(fixture, "member"), true))
+      .resolves.toMatchObject({ coachEnabled: true, timezone: "Europe/Moscow" });
+
+    // Выключение работает и вовсе без известного пояса: молчание важнее точного времени.
+    await database().query("DELETE FROM user_notification_settings");
+    await expect(reminderRepository.setCoach(privateAuth(fixture, "member"), false))
+      .resolves.toMatchObject({ coachEnabled: false, timezone: "UTC" });
+  });
+
   it("delivers and durably completes a saved reminder while every non-Telegram HTTP endpoint fails", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");

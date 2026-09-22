@@ -17,6 +17,13 @@
  *
  * Включается только явным «да»: пока человек не ответил на приглашение, вопросов нет, молчание
  * это «не включено», а не пауза.
+ *
+ * Поводы делятся по отношениям (22 сентября 2026): традиции вдвоём и первая совместная практика
+ * обращены к партнёру, а время для себя, тёплый вопрос недели и адресованное решение годятся
+ * любому взрослому. Отношения с родителем это другие отношения, и смешивать их нельзя.
+ *
+ * У включённого недельного обзора тёплый вопрос недели отбирается: обзор спрашивает про ту же
+ * неделю в тот же воскресный вечер, и два вопроса подряд человек читает как рассылку.
  */
 
 export type CoachReason =
@@ -30,6 +37,8 @@ export type CoachReason =
 export interface CoachFacts {
   /** `null`: приглашения ещё не было или на него не ответили; `false`: «без коуча». */
   readonly enabled: boolean | null;
+  /** Кто человек владельцу семьи. Пока не сказано — только нейтральные вопросы. */
+  readonly relation: "child" | "other" | "parent" | "partner" | null;
   readonly invited: boolean;
   readonly lastTouchAt: Date | null;
   readonly touchesLastWeek: number;
@@ -40,6 +49,8 @@ export interface CoachFacts {
   readonly quietRitual: { readonly id: string; readonly title: string } | null;
   readonly personalWindows: number;
   readonly familyRituals: number;
+  /** Включён недельный обзор: он сам спрашивает про неделю, и коуч про неё молчит. */
+  readonly weeklyReviewEnabled: boolean;
 }
 
 export interface CoachClock {
@@ -90,6 +101,9 @@ export function chooseCoachTouch(facts: CoachFacts, clock: CoachClock, now: Date
   if (facts.lastTouchAt !== null && now.getTime() - facts.lastTouchAt.getTime() < COACH_MIN_GAP_MS) return null;
   if (facts.touchesLastWeek >= COACH_WEEKLY_LIMIT) return null;
 
+  // Отношения с супругом и с родителем разные: вопрос про традицию вдвоём обращён к партнёру, и
+  // маме он не адресован вовсе. Пока родство не названо, задаются только нейтральные вопросы.
+  const partner = facts.relation === "partner";
   if (facts.openDecision) {
     const { id, proposer, title } = facts.openDecision;
     return {
@@ -98,7 +112,7 @@ export function chooseCoachTouch(facts: CoachFacts, clock: CoachClock, now: Date
         + "Решаешь только ты, молчание я согласием не считаю.",
     };
   }
-  if (facts.quietRitual) {
+  if (partner && facts.quietRitual) {
     const { id, title } = facts.quietRitual;
     return {
       reason: "ritual_checkin", subject: id,
@@ -106,7 +120,9 @@ export function chooseCoachTouch(facts: CoachFacts, clock: CoachClock, now: Date
         + "Можно отметить, пропустить или снять традицию, ничего не горит.",
     };
   }
-  const weekEnd = clock.weekday === 5 || clock.weekday === 0;
+  // Недельный обзор задаёт «что помогло» и «что давит» в тот же воскресный вечер. Два вопроса про
+  // одну неделю подряд это уже рассылка, поэтому тёплый вопрос уступает обзору целиком.
+  const weekEnd = !facts.weeklyReviewEnabled && (clock.weekday === 5 || clock.weekday === 0);
   if (weekEnd && clock.hour >= WEEK_WARM_FIRST_HOUR && olderThan(facts.lastByReason.week_warm, WEEK_WARM_GAP_MS, now)) {
     return {
       reason: "week_warm", subject: null,
@@ -120,7 +136,7 @@ export function chooseCoachTouch(facts: CoachFacts, clock: CoachClock, now: Date
         + "личного времени, и в него я писать не буду.",
     };
   }
-  if (facts.familyRituals === 0 && olderThan(facts.lastByReason.ritual_none, SLOW_REASON_GAP_MS, now)) {
+  if (partner && facts.familyRituals === 0 && olderThan(facts.lastByReason.ritual_none, SLOW_REASON_GAP_MS, now)) {
     return {
       reason: "ritual_none", subject: null,
       text: "Есть что-то маленькое, что хочется делать вместе регулярно: чай без телефонов, "

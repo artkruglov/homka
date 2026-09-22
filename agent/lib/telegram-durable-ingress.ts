@@ -333,21 +333,32 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
             }
             const transcript =
               claim.transcript ?? (await dependencies.transcribeVoice(claim.voice)).trim();
-            if (!transcript) {
+            // В личном чате человек ждёт ответа именно на это сообщение, поэтому пустой
+            // транскрипт — понятная ошибка. В группе речь распознаётся ради адресации, и смех или
+            // музыка не должны ронять update: иначе сообщение пропадает даже из журнала.
+            if (!transcript && update.message.chat.type === "private") {
               throw new AppError(
                 "AGENT_VOICE_TRANSCRIPT_EMPTY",
                 "В голосовом сообщении не удалось распознать речь. Запишите его ещё раз",
               );
             }
-            if (!claim.transcript) {
-              await dependencies.repository.saveVoiceTranscript(
-                claim.updateId,
-                claim.leaseToken,
-                transcript,
-              );
+            if (!transcript) {
+              console.warn(JSON.stringify({
+                code: "AGENT_VOICE_TRANSCRIPT_EMPTY_IN_GROUP",
+                chatType: update.message.chat.type,
+              }));
             }
-            payload = withTranscript(payload, transcript);
-            update = parseTelegramUpdate(payload);
+            if (transcript) {
+              if (!claim.transcript) {
+                await dependencies.repository.saveVoiceTranscript(
+                  claim.updateId,
+                  claim.leaseToken,
+                  transcript,
+                );
+              }
+              payload = withTranscript(payload, transcript);
+              update = parseTelegramUpdate(payload);
+            }
             if (update) update = withRichMessageText(update);
             if (!update) {
               throw new AppError(

@@ -12,7 +12,6 @@
 import { AppError } from "./app-error.js";
 import { extractMemoryUsedDirective } from "./memory-used-directive.js";
 import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
-import { TELEGRAM_KEEP_OPEN_DIRECTIVE } from "./telegram-final-presentation.js";
 import {
   isTelegramMessageReactionEmoji,
   nearestTelegramReactionEmoji,
@@ -83,7 +82,7 @@ export function completedTelegramOutput(data: {
 
   // Text authored before a tool call is what a person reads while a long task runs.
   if (data.finishReason === TOOL_CALLS_FINISH_REASON) {
-    const progress = stripTelegramAsideDirectives(message).split(TELEGRAM_KEEP_OPEN_DIRECTIVE).join("").trim();
+    const progress = stripTelegramAsideDirectives(message).trim();
     // Transport directives belong to the final answer; interim noise is dropped, never delivered.
     if (!progress || progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT)) return null;
     return { kind: "progress", message: progress };

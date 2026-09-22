@@ -8,7 +8,8 @@ const DAY = 24 * 60 * 60 * 1000;
 const ago = (days: number) => new Date(NOW.getTime() - days * DAY);
 const facts = (extra: Partial<CoachFacts> = {}): CoachFacts => ({
   enabled: true, familyRituals: 1, invited: true, lastByReason: {}, lastTouchAt: null,
-  openDecision: null, personalWindows: 1, quietRitual: null, touchesLastWeek: 0, ...extra,
+  openDecision: null, personalWindows: 1, quietRitual: null, relation: "partner", touchesLastWeek: 0,
+  weeklyReviewEnabled: false, ...extra,
 });
 const afternoon = { hour: 15, weekday: 3 };
 
@@ -64,6 +65,16 @@ describe("coach touch", () => {
     expect(chooseCoachTouch(facts(), { hour: 19, weekday: 3 }, NOW)).toBeNull();
   });
 
+  it("leaves the week to the weekly review when the person asked for it", () => {
+    // Обзор спрашивает «что помогло» и «что давит» тем же вечером: второй вопрос это рассылка.
+    const review = facts({ weeklyReviewEnabled: true });
+    expect(chooseCoachTouch(review, { hour: 19, weekday: 0 }, NOW)).toBeNull();
+    expect(chooseCoachTouch(review, { hour: 19, weekday: 5 }, NOW)).toBeNull();
+    // Остальные поводы обзор не отменяет: он про дела, а не про личное время.
+    expect(chooseCoachTouch(facts({ weeklyReviewEnabled: true, personalWindows: 0 }), { hour: 19, weekday: 0 }, NOW)
+      ?.reason).toBe("rest_window_missing");
+  });
+
   it("asks about own time and a first tradition at most every two weeks", () => {
     expect(chooseCoachTouch(facts({ personalWindows: 0, lastByReason: { rest_window_missing: ago(13) } }), afternoon, NOW))
       .toBeNull();
@@ -79,5 +90,20 @@ describe("coach touch", () => {
       chooseCoachTouch(facts(), { hour: 19, weekday: 0 }, NOW)!.text,
     ];
     for (const text of texts) expect(text).not.toMatch(/(^|\s)(дело|дела|дел)([\s,.?!]|$)|срок|просроч|\d/iu);
+  });
+
+  it("keeps couple questions for the partner and leaves a parent the neutral ones", () => {
+    // Отношения с супругой и с мамой разные: традиция вдвоём маме не адресована вовсе.
+    const parent = { relation: "parent" as const };
+    expect(chooseCoachTouch(facts({ ...parent, quietRitual: { id: "r1", title: "Чай" } }), afternoon, NOW))
+      .toBeNull();
+    expect(chooseCoachTouch(facts({ ...parent, familyRituals: 0 }), afternoon, NOW)).toBeNull();
+    expect(chooseCoachTouch(facts({ ...parent, personalWindows: 0 }), afternoon, NOW)?.reason)
+      .toBe("rest_window_missing");
+    expect(chooseCoachTouch(facts(parent), { hour: 19, weekday: 5 }, NOW)?.reason).toBe("week_warm");
+    expect(chooseCoachTouch(facts({ ...parent, openDecision: { id: "d1", proposer: "Саша", title: "Поехать" } }),
+      afternoon, NOW)?.reason).toBe("decision_open");
+    // Пока родство не названо, парные вопросы тоже молчат.
+    expect(chooseCoachTouch(facts({ relation: null, familyRituals: 0 }), afternoon, NOW)).toBeNull();
   });
 });

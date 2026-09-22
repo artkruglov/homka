@@ -45,4 +45,15 @@ describe("formatDailyOverview", () => {
     expect(formatDailyOverview({ ...empty, tasks: [task("Дело")] }, { first: true }))
       .toContain("Это утренний обзор");
   });
+
+  it("stays silent on a day that holds only ideas and traditions", () => {
+    // Идея ничего не обещает: утреннее сообщение ради неё делает из желания долг (B01).
+    expect(formatDailyOverview({
+      now: NOW, timezone: "UTC", waiting: [],
+      tasks: [
+        { dueAt: null, dueOn: null, kind: "idea", listName: null, source: "Личное", status: "accepted", title: "Керамика" },
+        { dueAt: null, dueOn: null, kind: "ritual", listName: null, source: "Семья", status: "accepted", title: "Воскресный чай" },
+      ],
+    })).toBeNull();
+  });
 });

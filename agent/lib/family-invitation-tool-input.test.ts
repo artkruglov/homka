@@ -75,7 +75,7 @@ describe("manage_family_invitation model input", () => {
 
     expect(schema.type).toBe("object");
     expect(schema.required).toContain("action");
-    expect(schema.properties.action?.enum).toEqual(["create", "approve"]);
+    expect(schema.properties.action?.enum).toEqual(["create", "approve", "set_relation"]);
   });
 
   it("rejects the same incomplete approval candidate before HITL and execution", async () => {

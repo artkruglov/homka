@@ -46,8 +46,17 @@ function invitationDeliveryAmbiguousError(): AppError {
   );
 }
 
+export type FamilyRelation = "child" | "other" | "parent" | "partner";
+
 export interface FamilyRepository {
   approveInvitation(input: ApproveInvitationInput): Promise<{ approved: true }>;
+  /** Кто кому кто: метка отношения участника к владельцу семьи. Прав она не даёт. */
+  setRelation(input: {
+    familyId: string;
+    ownerUserId: string;
+    participantRef: string;
+    relation: FamilyRelation;
+  }): Promise<{ name: string; relation: FamilyRelation }>;
   claimInvitation(code: string, profile: TelegramProfile): Promise<"invalid" | "pending">;
   createInvitation(
     familyId: string,
@@ -79,6 +88,47 @@ export interface FamilyRepository {
 }
 
 export const familyRepository: FamilyRepository = {
+  async setRelation(input) {
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      // Роль владельца перепроверяется живым запросом, а участник берётся по ref семейного списка.
+      const updated = await client.query<{ display_name: string }>(
+        `UPDATE family_memberships AS membership SET relation = $4
+           FROM users AS person, shared_task_participants AS participant
+          WHERE participant.id = $3 AND participant.family_id = $1 AND participant.group_id IS NULL
+            AND person.telegram_user_id = participant.telegram_user_id
+            AND membership.user_id = person.id AND membership.family_id = $1
+            AND membership.user_id <> $2
+            AND EXISTS (SELECT 1 FROM family_memberships AS owner
+                         WHERE owner.family_id = $1 AND owner.user_id = $2 AND owner.role = 'owner')
+          RETURNING person.display_name`,
+        [input.familyId, input.ownerUserId, input.participantRef, input.relation],
+      );
+      if (updated.rowCount !== 1) {
+        throw new AppError(
+          "AGENT_FAMILY_RELATION_INVALID",
+          "Не нашла этого участника семьи. Возьмите participantRef из списка участников",
+        );
+      }
+      await client.query(
+        `INSERT INTO audit_events (family_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, 'family.relation', jsonb_build_object('relation', $3::text))`,
+        [input.familyId, input.ownerUserId, input.relation],
+      );
+      await client.query("COMMIT");
+      console.info(JSON.stringify({
+        code: "AGENT_FAMILY_RELATION_SET", familyId: input.familyId, relation: input.relation,
+      }));
+      return { name: updated.rows[0]!.display_name, relation: input.relation };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async claimInvitation(code, profile) {
     const client = await database().connect();
     try {

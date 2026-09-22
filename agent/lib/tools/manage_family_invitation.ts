@@ -22,15 +22,19 @@ import {
   requiredUuid,
   requireInputRecord,
   requireOnlyFields,
+  toolInputError,
 } from "../tool-input-validation.js";
 
 const INPUT_ERROR_CODE = "AGENT_FAMILY_INVITATION_INPUT_INVALID";
-const TOOL_ACTIONS = ["create", "approve"] as const;
+const TOOL_ACTIONS = ["create", "approve", "set_relation"] as const;
+const RELATIONS = ["partner", "parent", "child", "other"] as const;
 const TOP_LEVEL_FIELDS = [
   "action",
   "candidateDisplayName",
   "candidateTelegramUserId",
   "invitationId",
+  "participantRef",
+  "relation",
 ] as const;
 
 const manageFamilyInvitationSchema = z.object({
@@ -38,6 +42,8 @@ const manageFamilyInvitationSchema = z.object({
   candidateDisplayName: z.string().optional().describe("Обязательно только для action=approve."),
   candidateTelegramUserId: z.string().optional().describe("Обязательно только для action=approve."),
   invitationId: z.string().optional().describe("UUID обязателен только для action=approve."),
+  participantRef: z.string().optional().describe("Обязательно для action=set_relation: ref из participants."),
+  relation: z.enum(RELATIONS).optional().describe("Обязательно для action=set_relation."),
 }).strict();
 
 function requireApproveInput(input: Record<string, unknown>) {
@@ -66,18 +72,33 @@ function requireManageFamilyInvitationInput(input: unknown) {
   // MiniMax may materialize known approve-only siblings for create. Creation ignores them and
   // cannot bind a candidate accidentally; unpublished fields still fail in the global guard.
   if (action === "create") return { action } as const;
+  if (action === "set_relation") {
+    requireOnlyFields(payload, ["action", "participantRef", "relation"], "action=set_relation", INPUT_ERROR_CODE);
+    const relation = payload["relation"];
+    if (typeof relation !== "string" || !RELATIONS.includes(relation as typeof RELATIONS[number])) {
+      toolInputError(INPUT_ERROR_CODE, "Поле relation должно быть partner, parent, child или other");
+    }
+    return {
+      action,
+      participantRef: requiredUuid(payload, "participantRef", INPUT_ERROR_CODE, "участник из participants"),
+      relation: relation as typeof RELATIONS[number],
+    } as const;
+  }
   return { action, candidate: requireApproveInput(payload) } as const;
 }
 
 const TOOL_DESCRIPTION = [
   "Создать одноразовое семейное приглашение или подтвердить кандидата; оба action требуют подтверждения. Create: {\"action\":\"create\"} без полей кандидата.",
+  "Set_relation: {\"action\":\"set_relation\",\"participantRef\":\"<ref из participants>\",\"relation\":\"partner|parent|child|other\"} по явным словам владельца о том, кто ему кто; кнопки не требует, прав не меняет, нужна, чтобы вопросы про пару не уходили родителю.",
   "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID из list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}; все три значения берутся точно из list_pending_family_invitations, иначе запроси список снова или спроси владельца.",
 ].join(" ");
 
 export default defineTool({
   approval: ({ toolInput }) => {
-    requireManageFamilyInvitationInput(toolInput);
-    return "user-approval";
+    // Метка родства обратима и прав не меняет, поэтому кнопка нужна только приглашениям.
+    return requireManageFamilyInvitationInput(toolInput).action === "set_relation"
+      ? "not-applicable"
+      : "user-approval";
   },
   description: TOOL_DESCRIPTION,
   inputSchema: manageFamilyInvitationSchema,
@@ -85,6 +106,14 @@ export default defineTool({
     const parsed = requireManageFamilyInvitationInput(input);
     const owner = requirePrivateTelegramOwner(ctx);
     const space=readSpaceAttributes(ctx.session.auth.current?.attributes);
+    if (parsed.action === "set_relation") {
+      return await familyRepository.setRelation({
+        familyId: owner.familyId,
+        ownerUserId: owner.userId,
+        participantRef: parsed.participantRef,
+        relation: parsed.relation,
+      });
+    }
     if (parsed.action === "approve") {
       return await familyRepository.approveInvitation({
         ...(space?{space}:{}),

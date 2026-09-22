@@ -64,7 +64,9 @@ function visible(scope: MemoryScope, view?: string): string {
     if (view === "waiting") return waiting;
     if (view === "promised") return promised;
     if (view === "transfers") return "t.pending_assignee_telegram_id=$2";
-    return "(t.assignee_telegram_id=$2 OR (t.kind<>'task' AND pplan.telegram_user_id=$2))";
+    // Семейная традиция общая: её видят оба, иначе второй человек не знал бы о том, что семья
+    // решила поддерживать. Чужая личная идея остаётся личной.
+    return "(t.assignee_telegram_id=$2 OR (t.kind<>'task' AND (pplan.telegram_user_id=$2 OR t.scope='family')))";
   }
   const area = scope === "family" ? "t.scope='family'" : "t.scope='group' AND t.group_id=$3";
   if (view === "waiting") return `${area} AND ${waiting}`;

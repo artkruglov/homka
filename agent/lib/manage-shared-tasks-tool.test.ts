@@ -32,6 +32,13 @@ describe("manage_shared_tasks list board", () => {
     expect(result.board).toContain("**Работа · 1**\n• Написать подрядчику");
   });
 
+  it("adds no board to someone else's commitments", async () => {
+    mocks.execute.mockResolvedValue({ incomplete: false, nextCursor: null, tasks: [row("Забрать посылку", "Дом")] });
+
+    expect(await manageSharedTasks.execute({ action: "list", view: "waiting" } as never, context))
+      .not.toHaveProperty("board");
+  });
+
   it("adds no board to a change", async () => {
     mocks.execute.mockResolvedValue({ replayed: false, task: row("Дело", "Дом") });
 

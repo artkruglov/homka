@@ -99,13 +99,12 @@ dbDescribe("daily overview data", () => {
     expect(text).toContain("Работа · 1\n• Продвинуться по продаже");
   });
 
-  it("gives the day away once and takes it back whole", async () => {
+  it("gives the day away once and keeps it for that day", async () => {
     const recipient = recipientOf(fixture.owner);
     // Заявка отдаёт ссылку доставки: под ней отправленный обзор попадает в журнал личного чата.
     await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toMatch(/^[0-9a-f-]{36}$/u);
     await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toBeNull();
-    await dailyOverviewRepository.release(recipient, TODAY);
-    await expect(dailyOverviewRepository.claim(recipient, TODAY)).resolves.toMatch(/^[0-9a-f-]{36}$/u);
+    await expect(dailyOverviewRepository.claim(recipient, day(1))).resolves.toMatch(/^[0-9a-f-]{36}$/u);
   });
 
   it("reads every person with a private chat and their own rule", async () => {

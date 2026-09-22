@@ -87,19 +87,20 @@ export const personalTimeRepository = {
   },
 
   /**
-   * Название окна, в которое попадает чужой срок, либо `null`. Читается по Telegram-идентификатору
-   * исполнителя: у планировщика на руках именно он, а пояс берётся из настроек самого человека.
+   * Название окна, в которое попадает срок, либо `null`. Читается по Telegram-идентификатору
+   * человека внутри его семьи, а пояс берётся из его настроек. Название годится для решения и для
+   * собственного окна человека; чужому участнику оно не показывается — довольно самой занятости.
    */
-  async conflictFor(telegramUserId: string, at: Date): Promise<string | null> {
+  async conflictFor(telegramUserId: string, familyId: string, at: Date): Promise<string | null> {
     const { rows } = await database().query<{ title: string }>(
       // `window` в PostgreSQL зарезервировано: псевдоним не может так называться.
       `SELECT slot.title FROM personal_time_windows AS slot
          JOIN users AS person ON person.id = slot.user_id
          LEFT JOIN user_notification_settings AS settings ON settings.user_id = person.id
-        WHERE person.telegram_user_id = $2
+        WHERE person.telegram_user_id = $2 AND slot.family_id = $3
           AND ${personalTimeClause({ alias: "slot", at: "$1", timezone: "settings.timezone" })}
         LIMIT 1`,
-      [at, telegramUserId],
+      [at, telegramUserId, familyId],
     );
     return rows[0]?.title ?? null;
   },

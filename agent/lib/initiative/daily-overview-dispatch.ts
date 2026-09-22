@@ -10,8 +10,9 @@
  * молчания), потом содержание — и только потом заявка. Пустой обзор не занимает ни предел, ни
  * заявку: день, в котором нечего сказать, должен остаться днём без сообщения.
  *
- * Заявка пишется до отправки: два тика подряд не отправят два одинаковых обзора. Отказ Telegram
- * однозначен и заявку возвращает, любой другой сбой оставляет исход неизвестным — повтора нет.
+ * Заявка пишется до отправки: два тика подряд не отправят два одинаковых обзора. Определённый
+ * отказ Telegram (бот заблокирован) заявку не возвращает: повтор каждый тик только шумел бы в
+ * логах. Любой другой сбой оставляет исход неизвестным — повтора тоже нет.
  * Отправленный обзор пишется в журнал доставок личного чата: иначе ответ «первое сделала» приходил
  * в ход, который обзора не видел.
  */
@@ -43,7 +44,6 @@ export interface DailyOverviewDispatcherDependencies {
   record(delivery: InitiativeDelivery): Promise<void>;
   overview(recipient: DailyOverviewRecipient): Promise<DailyOverview>;
   recipients(): Promise<DailyOverviewRecipient[]>;
-  release(recipient: DailyOverviewRecipient, localDate: string): Promise<void>;
 }
 
 function localParts(timezone: string, now: Date): { date: string; hour: number } {
@@ -77,7 +77,6 @@ export function createDailyOverviewDispatcher(
         messageId = await dependencies.send({ chatId: recipient.telegramUserId, text });
       } catch (error) {
         const refused = error instanceof MemoryReviewOwnerAlertTransportError;
-        if (refused) await dependencies.release(recipient, local.date);
         console.error(JSON.stringify({
           code: refused ? "AGENT_DAILY_OVERVIEW_FAILED" : "AGENT_DAILY_OVERVIEW_AMBIGUOUS",
           error: error instanceof Error ? error.message : String(error),

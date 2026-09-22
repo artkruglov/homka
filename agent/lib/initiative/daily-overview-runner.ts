@@ -20,8 +20,7 @@ export function dispatchDailyOverviews(now = new Date()): Promise<number> {
     send: (input) => memoryReviewOwnerAlertTransport.send(input),
     overview: (recipient) => dailyOverviewRepository.overview(recipient),
     personalTime: (recipient, at) =>
-      personalTimeRepository.conflictFor(recipient.telegramUserId, at),
+      personalTimeRepository.conflictFor(recipient.telegramUserId, recipient.familyId, at),
     recipients: () => dailyOverviewRepository.recipients(now),
-    release: (recipient, localDate) => dailyOverviewRepository.release(recipient, localDate),
   })(now);
 }

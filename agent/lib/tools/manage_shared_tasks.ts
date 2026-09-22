@@ -34,7 +34,10 @@ export default defineTool({
     const auth = requireMemoryAuthorization(ctx);
     const result = await sharedTaskRepository.execute(auth, input, `${ctx.session.id}:${ctx.callId}`);
     // Доску собирает код: пересказанный моделью список приходил сплошным абзацем и прятался под кат.
-    const tasks = input.action === "list" ? (result as { tasks?: readonly BoardTask[] }).tasks : undefined;
+    // Виды чужих обязательств (просьбы другим, входящие передачи) доской не оформляются: там
+    // строки не про дела самого человека, и «Открытых дел: N» вводило бы в заблуждение.
+    const ownList = input.action === "list" && !["transfers", "waiting"].includes(String(input.view ?? ""));
+    const tasks = ownList ? (result as { tasks?: readonly BoardTask[] }).tasks : undefined;
     if (!tasks) return result;
     const timezone = await currentTimeRepository.findTurnTimezone(auth.userId, auth.familyId) ?? "UTC";
     return { ...result, board: taskBoardReply(tasks, new Date(), timezone) };

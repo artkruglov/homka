@@ -27,6 +27,7 @@ const quiet: OwnerHealthReport = {
   },
   memoryWritten: [{ count: 3, kind: "episode", scope: "group" }, { count: 1, kind: "profile", scope: "personal" }],
   modelSpend: { cacheHitTokens: 0, cacheMissTokens: 0, calls: 0, costUsd: 0, outputTokens: 0, unpricedCalls: 0, webSearchCalls: 0 },
+  practices: null,
   proactiveFailures: { reminders: 0, schedules: 0 },
   reviewBatches: { ambiguous: 0, failed: 0 },
   rotations: { count: 0, latestAt: null },
@@ -222,4 +223,23 @@ describe("createOwnerHealthDigestDispatcher", () => {
     expect(deps.complete).toHaveBeenCalledWith("family-2", "2026-09-09", expect.any(Date), expect.any(Number));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("AGENT_OWNER_HEALTH_DIGEST_FAILED"));
   });
+
+describe("weekly practices block", () => {
+  it("appears only on the weekly report and counts outcomes, never people", () => {
+    expect(formatOwnerHealthDigest(quiet)).not.toContain("За неделю");
+
+    const weekly = formatOwnerHealthDigest({
+      ...quiet,
+      practices: {
+        answered: { coach: 1, partnerAlert: 2, weeklyReview: 0 },
+        closedTasks: 7, newCareAreas: 1, newIdeas: 2, newRituals: 1,
+        sent: { coach: 2, partnerAlert: 3, weeklyReview: 1 },
+      },
+    });
+
+    expect(weekly).toContain("За неделю: касаний коуча 2 (ответов 1), уведомлений 3 (ответов 2), обзоров 1 (ответов 0).");
+    expect(weekly).toContain("Появилось за неделю: традиций 1, идей 2, областей заботы 1; закрыто дел 7.");
+    expect(weekly).not.toMatch(/вклад|больше|рейтинг/iu);
+  });
+});
 });

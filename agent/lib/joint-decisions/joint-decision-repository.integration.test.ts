@@ -31,6 +31,21 @@ async function create(){
     expect(cleared.feedback).toEqual([]);
     expect((await database().query("SELECT count(*)::int AS n FROM joint_decisions")).rows[0].n).toBe(1);
   });
+  it("lets the named person answer from their own private chat, but not propose there",async()=>{
+    // Уведомление о решении приходит в личку; требовать переключения в общую область ради ответа
+    // значит не получить ответа вовсе.
+    const d=await create();
+    // Личный чат без выбранной общей области: ровно так выглядит ход после уведомления.
+    const personal={...await auth(f.spouse),space:undefined} as unknown as Awaited<ReturnType<typeof auth>>;
+    const seen=(await repo.execute(personal,{action:"get",id:d.id},"get")).decision!;
+    expect(seen).toMatchObject({id:d.id,status:"open"});
+    const answered=(await repo.execute(personal,{action:"answer",id:d.id,version:seen.version,choice:"agree"},"answer")).decision!;
+    expect(answered.answers).toHaveLength(1);
+    expect((await repo.execute(personal,{action:"list"},"list")).decisions).toHaveLength(1);
+    await expect(repo.execute(personal,{action:"create",title:"Новое предложение",
+      partnerRef:(await repo.execute(await auth(),{action:"participants"},"people")).participants!.find(p=>p.name==="Супруга")!.participantRef},"create-personal"))
+      .rejects.toThrow(/AGENT_DECISION_SHARED_SPACE_REQUIRED/);
+  });
   it("rejects neighboring space, stale changes and revoked access",async()=>{
     const d=await create(),owner=await auth(),spouse=await auth(f.spouse);
     await expect(repo.execute(await auth(f.owner,f.householdSpaceId),{action:"get",id:d.id},"wrong-space")).rejects.toThrow(/AGENT_DECISION_ACCESS_DENIED/);

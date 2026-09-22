@@ -193,6 +193,10 @@ add("personal_time_windows", {
 });
 add("model_usage_events", { action: "control", reason: "Installation-wide token and dollar counters per model call; no person, chat, area or content" });
 add("initiative_messages", { action: "control", reason: "How often the bot wrote to one person first; a personal limit, not the content of any area" });
+add("partner_alert_claims", {
+  action: "control",
+  reason: "Which addressed item a person was already told about; a per-person receipt that prevents a repeat, not the content of any area",
+});
 add("software_update_proposals owner_health_digests owner_balance_alerts memory_exports", {
   action: "control", reason: "Retain operation receipts under operator/requester checks; cutover does not revive or replay requests",
 });

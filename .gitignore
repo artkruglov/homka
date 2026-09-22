@@ -25,3 +25,6 @@ docs/family-launch-review.ru.md
 docs/family-product-audit.ru.md
 docs/family-scenarios-check.ru.md
 docs/yandex-cloud-launch.ru.md
+
+# Рабочие копии агентов живут внутри проекта и в историю не входят.
+.claude/worktrees/

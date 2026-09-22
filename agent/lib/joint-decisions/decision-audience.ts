@@ -9,9 +9,29 @@ function sharedRequired():never {
   throw new AppError("AGENT_DECISION_SHARED_SPACE_REQUIRED","Выберите общую область или семейный чат для совместного решения");
 }
 
-/** Caller holds a transaction. The space is locked before family membership and directory rows. */
-export async function decisionAudience(client:PoolClient,auth:MemoryAuthorization,create=false) {
-  if(!auth.userId || auth.role==="external" || (!auth.groupId&&!auth.space))sharedRequired();
+/**
+ * Caller holds a transaction. The space is locked before family membership and directory rows.
+ *
+ * `allowPersonal` значит «человек отвечает у себя в личке»: уведомление о решении приходит именно
+ * туда, и требовать переключения в общую область ради ответа — верный способ не получить ответа.
+ * Создание предложения по-прежнему требует доказанной общей аудитории.
+ */
+export async function decisionAudience(
+  client:PoolClient,auth:MemoryAuthorization,create=false,allowPersonal=false,
+) {
+  if(!auth.userId || auth.role==="external")sharedRequired();
+  if(!auth.groupId&&!auth.space){
+    if(!allowPersonal||auth.telegramActorKind!=="telegram_user")sharedRequired();
+    await participants(client,auth,"family");
+    const rows=(await client.query<{id:string;display_name:string}>(
+      `SELECT p.id,u.display_name FROM shared_task_participants p
+        JOIN users u ON u.telegram_user_id=p.telegram_user_id
+        JOIN family_memberships m ON m.user_id=u.id AND m.family_id=p.family_id
+        WHERE p.family_id=$1 AND p.group_id IS NULL ORDER BY u.display_name,p.id LIMIT 100`,
+      [auth.familyId])).rows;
+    return {personalAnswer:true as const,spaceId:null,
+      participants:rows.map(row=>({participantRef:row.id,name:row.display_name}))};
+  }
   const spaceId=await requireSpaceAction(client,{familyId:auth.familyId,userId:auth.userId,groupId:auth.groupId,
     chatType:auth.groupId?"supergroup":"private",...(auth.space?{space:auth.space}:{})},create?"write":"read");
   if(spaceId){
@@ -29,5 +49,6 @@ export async function decisionAudience(client:PoolClient,auth:MemoryAuthorizatio
         SELECT 1 FROM space_memberships sm WHERE sm.family_id=p.family_id
           AND sm.space_id=$2 AND sm.user_id=u.id AND sm.state='active'))
       ORDER BY u.display_name,p.id LIMIT 100`,[auth.familyId,spaceId]);
-  return {spaceId,participants:result.rows.map(row=>({participantRef:row.id,name:row.display_name}))};
+  return {personalAnswer:false as const,spaceId,
+    participants:result.rows.map(row=>({participantRef:row.id,name:row.display_name}))};
 }

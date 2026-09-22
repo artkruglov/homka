@@ -24,16 +24,18 @@ import {
 } from "../tool-input-validation.js";
 
 const INPUT_ERROR_CODE = "AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID";
-const TOOL_ACTIONS = ["get", "set", "coach"] as const;
+const TOOL_ACTIONS = ["get", "set", "coach", "weekly_review"] as const;
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const TOP_LEVEL_FIELDS = ["action", "coachEnabled", "initiativeDailyLimit", "initiativeEnabled", "quietEnd",
-  "quietStart", "timezone"] as const;
+  "quietStart", "timezone", "weeklyReviewEnabled"] as const;
 
 const nullableTimeSchema = z.union([z.string(), z.null()]).optional();
 const notificationSettingsSchema = z.object({
-  action: z.enum(TOOL_ACTIONS).describe("Обязательный action: get, set или coach."),
+  action: z.enum(TOOL_ACTIONS).describe("Обязательный action: get, set, coach или weekly_review."),
   coachEnabled: z.boolean().optional()
     .describe("Обязательно для action=coach: true по явному «да» на приглашение коуча, false на «без коуча»."),
+  weeklyReviewEnabled: z.boolean().optional()
+    .describe("Обязательно для action=weekly_review: true по явной просьбе о недельном обзоре, false на «хватит обзоров»."),
   quietEnd: nullableTimeSchema.describe("Обязательно для action=set: ЧЧ:ММ или null."),
   quietStart: nullableTimeSchema.describe("Обязательно для action=set: ЧЧ:ММ или null."),
   timezone: z.string().optional().describe("Обязательный IANA timezone только для action=set."),
@@ -111,17 +113,25 @@ function requireNotificationSettingsInput(input: unknown) {
     }
     return { action, enabled: payload["coachEnabled"] as boolean } as const;
   }
+  if (action === "weekly_review") {
+    requireOnlyFields(payload, ["action", "weeklyReviewEnabled"], "action=weekly_review", INPUT_ERROR_CODE);
+    if (typeof payload["weeklyReviewEnabled"] !== "boolean") {
+      toolInputError(INPUT_ERROR_CODE, "Для action=weekly_review передайте weeklyReviewEnabled true или false");
+    }
+    return { action, enabled: payload["weeklyReviewEnabled"] as boolean } as const;
+  }
   return { action, values: requireSetInput(payload) } as const;
 }
 
 const TOOL_DESCRIPTION = [
-  "Получить или настроить личный IANA timezone и тихие часы. В тихие часы не приходит ничего, что начато без просьбы человека: ни напоминание, ни сводка, ни предупреждение, ни предложение обновления. Отложенное уходит, когда тихие часы кончаются. Get: {\"action\":\"get\"}. Set: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}; quietStart и quietEnd разные значения ЧЧ:ММ, для отключения тихих часов оба null. Просьбу «не пиши мне первым» передавай как initiativeEnabled false, число сообщений в сутки как initiativeDailyLimit; непереданные поля остаются прежними. Не угадывай timezone и часы: если данных нет, спроси пользователя. Coach: {\"action\":\"coach\",\"coachEnabled\":true} только на явное «да» человека на приглашение коуча, false на «без коуча»; молчание и уклончивый ответ не согласие.",
+  "Получить или настроить личный IANA timezone и тихие часы. В тихие часы не приходит ничего, что начато без просьбы человека: ни напоминание, ни сводка, ни предупреждение, ни предложение обновления. Отложенное уходит, когда тихие часы кончаются. Get: {\"action\":\"get\"}. Set: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}; quietStart и quietEnd разные значения ЧЧ:ММ, для отключения тихих часов оба null. Просьбу «не пиши мне первым» передавай как initiativeEnabled false, число сообщений в сутки как initiativeDailyLimit; непереданные поля остаются прежними. Не угадывай timezone и часы: если данных нет, спроси пользователя. Coach: {\"action\":\"coach\",\"coachEnabled\":true} только на явное «да» человека на приглашение коуча, false на «без коуча»; молчание и уклончивый ответ не согласие. Weekly_review: {\"action\":\"weekly_review\",\"weeklyReviewEnabled\":true} по явной просьбе о недельном обзоре дел, false на «хватит обзоров»; обзор приходит в воскресенье вечером.",
 ].join(" ");
 
 export default defineTool({
   approval: ({ toolInput }) => {
     const parsed = requireNotificationSettingsInput(toolInput);
-    // Коуч меняет только то, пишет ли бот этому же человеку, и выключается одной фразой.
+    // Коуч и недельный обзор меняют только то, пишет ли бот этому же человеку, и выключаются
+    // одной фразой; кнопка подтверждения на такую настройку была бы лишним шагом.
     return parsed.action === "set" ? "user-approval" : "not-applicable";
   },
   description: TOOL_DESCRIPTION,
@@ -140,6 +150,9 @@ export default defineTool({
     }
     if (parsed.action === "coach") {
       return await reminderRepository.setCoach(authorization, parsed.enabled);
+    }
+    if (parsed.action === "weekly_review") {
+      return await reminderRepository.setWeeklyReview(authorization, parsed.enabled);
     }
 
     return await reminderRepository.configureNotifications(authorization, parsed.values);

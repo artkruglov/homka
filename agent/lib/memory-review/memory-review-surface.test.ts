@@ -70,7 +70,7 @@ describe("memory review instructions", () => {
   it("describes silent review for any conversation and the personal scope choice", () => {
     expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("тихая проверка памяти разговора");
     expect(MEMORY_REVIEW_INSTRUCTIONS).not.toContain("памяти группы");
-    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("scope personal");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("`scope: personal`");
   });
 });
 

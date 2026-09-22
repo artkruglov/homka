@@ -15,6 +15,8 @@
  *
  * Молчание это нормальный исход. Сообщение без содержания хуже, чем его отсутствие: человек
  * перестаёт читать утренние сообщения целиком, и следующее, в котором есть дело, тоже пропустит.
+ * Поэтому день, в котором открыты только идеи и традиции, тоже проходит молча: идея не создаёт
+ * напоминаний (история B01), а увидеть её можно в ответ на «покажи дела».
  */
 import { formatTaskBoard, type BoardTask } from "../task-board.js";
 
@@ -39,10 +41,18 @@ const FIRST_TIME_EXPLANATION = [
 ].join(" ");
 
 /** Возвращает `null`, когда говорить не о чем: пустой обзор не отправляется. */
+/** Идея ничего не обещает (история B01), поэтому сама по себе утреннего сообщения не вызывает. */
+function hasCommitment(overview: DailyOverview): boolean {
+  const open = (task: { status: string }) => ["open", "proposed", "accepted"].includes(task.status);
+  return overview.tasks.some((task) => task.kind === "task" && open(task)) ||
+    overview.waiting.some(open);
+}
+
 export function formatDailyOverview(
   overview: DailyOverview,
   options: { first?: boolean } = {},
 ): string | null {
+  if (!hasCommitment(overview)) return null;
   // Служебное сообщение уходит без разметки, поэтому доска в простом виде.
   const board = formatTaskBoard({
     now: overview.now, style: "plain", tasks: overview.tasks,

@@ -31,6 +31,18 @@ export interface OwnerHealthReport {
     lagging: { count: number; oldestAt: Date | null; waiting: number };
   };
   memoryWritten: { count: number; kind: string; scope: string }[];
+  /**
+   * Раз в неделю: что вышло из практик. Данные только из таблиц и только счётчиками — оценок
+   * людям и счёта вклада тут нет и быть не может, это здоровье службы, а не рейтинг семьи.
+   */
+  practices: {
+    answered: { coach: number; partnerAlert: number; weeklyReview: number };
+    closedTasks: number;
+    newCareAreas: number;
+    newIdeas: number;
+    newRituals: number;
+    sent: { coach: number; partnerAlert: number; weeklyReview: number };
+  } | null;
   /** Вызовы модели за окно по всей установке: одна установка обслуживает одну семью. */
   modelSpend: ModelSpendSummary;
   proactiveFailures: { reminders: number; schedules: number };
@@ -48,6 +60,54 @@ export interface OwnerHealthRecipient extends QuietHours {
 
 export const OWNER_HEALTH_LAGGING_MIN_WAITING = 50;
 export const OWNER_HEALTH_LAGGING_MIN_AGE_MILLISECONDS = 6 * 60 * 60 * 1_000;
+
+/** Воскресный блок: неделя практик одним запросом; в прочие дни его нет вовсе. */
+async function practicesOfWeek(
+  familyId: string,
+  now: Date,
+): Promise<OwnerHealthReport["practices"]> {
+  if (now.getUTCDay() !== 0) return null;
+  const client = database();
+  const initiative = await client.query<{ answered: string; kind: string; sent: string }>(
+    `SELECT kind::text AS kind, count(*)::text AS sent,
+            count(*) FILTER (WHERE answered_at IS NOT NULL)::text AS answered
+       FROM initiative_messages
+      WHERE family_id = $1 AND sent_at >= $2::timestamptz - interval '7 days'
+        AND kind::text IN ('coach', 'partner_alert', 'weekly_review')
+      GROUP BY kind`,
+    [familyId, now],
+  );
+  const counter = (kind: string, field: "answered" | "sent") =>
+    Number(initiative.rows.find((row) => row.kind === kind)?.[field] ?? 0);
+  const tasks = await client.query<{ closed: string; ideas: string; rituals: string }>(
+    `SELECT count(*) FILTER (WHERE status = 'completed' AND updated_at >= $2::timestamptz - interval '7 days')::text AS closed,
+            count(*) FILTER (WHERE kind = 'idea' AND created_at >= $2::timestamptz - interval '7 days')::text AS ideas,
+            count(*) FILTER (WHERE kind = 'ritual' AND created_at >= $2::timestamptz - interval '7 days')::text AS rituals
+       FROM shared_tasks WHERE family_id = $1`,
+    [familyId, now],
+  );
+  const areas = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM care_areas
+      WHERE family_id = $1 AND created_at >= $2::timestamptz - interval '7 days'`,
+    [familyId, now],
+  );
+  return {
+    answered: {
+      coach: counter("coach", "answered"),
+      partnerAlert: counter("partner_alert", "answered"),
+      weeklyReview: counter("weekly_review", "answered"),
+    },
+    closedTasks: Number(tasks.rows[0]?.closed ?? 0),
+    newCareAreas: Number(areas.rows[0]?.count ?? 0),
+    newIdeas: Number(tasks.rows[0]?.ideas ?? 0),
+    newRituals: Number(tasks.rows[0]?.rituals ?? 0),
+    sent: {
+      coach: counter("coach", "sent"),
+      partnerAlert: counter("partner_alert", "sent"),
+      weeklyReview: counter("weekly_review", "sent"),
+    },
+  };
+}
 
 export const ownerHealthDigestRepository = {
   async recipients(): Promise<OwnerHealthRecipient[]> {
@@ -187,6 +247,7 @@ export const ownerHealthDigestRepository = {
       },
       lanes: { blocked, lagging },
       memoryWritten: written.rows.map((row) => ({ count: Number(row.count), kind: row.kind, scope: row.scope })),
+      practices: await practicesOfWeek(familyId, now),
       modelSpend: await modelUsageRepository.summary(windowStart, now),
       proactiveFailures: {
         reminders: Number(proactive.rows[0]!.reminders),

@@ -13,10 +13,9 @@ import { recordInitiativeDelivery } from "./initiative-delivery.js";
 export function dispatchCoachTouches(now = new Date()): Promise<number> {
   return createCoachDispatcher({
     claim: (recipient, localDate, touch, at) => coachRepository.claim(recipient, localDate, touch, at),
-    personalTime: (recipient, at) => personalTimeRepository.conflictFor(recipient.telegramUserId, at),
+    personalTime: (recipient, at) => personalTimeRepository.conflictFor(recipient.telegramUserId, recipient.familyId, at),
     recipients: () => coachRepository.recipients(now),
     record: recordInitiativeDelivery,
-    release: (deliveryRef) => coachRepository.release(deliveryRef),
     send: (input) => memoryReviewOwnerAlertTransport.send(input),
   })(now);
 }

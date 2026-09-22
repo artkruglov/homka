@@ -2,7 +2,7 @@
  * Утренний обзор.
  *
  * Проверяется: ночью молчит, выключенный не приходит, пустой день не тратит ни предел, ни заявку,
- * дважды за сутки не уходит, отказ Telegram возвращает заявку, а неизвестный исход — нет;
+ * дважды за сутки не уходит, неудачная доставка заявку не возвращает;
  * отправленный обзор попадает в журнал доставок личного чата.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +34,6 @@ function dependencies(overrides: Partial<Parameters<typeof createDailyOverviewDi
       tasks: [{ dueAt: null, dueOn: "2026-09-20", kind: "task", listName: null, source: "Семья", status: "accepted", title: "Оплатить счёт" }],
     }),
     recipients: vi.fn().mockResolvedValue([person]),
-    release: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -109,20 +108,20 @@ describe("createDailyOverviewDispatcher", () => {
     expect(deps.send).not.toHaveBeenCalled();
   });
 
-  it("returns the claim when Telegram refuses and keeps it when the answer is lost", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("keeps the day's claim after any failed delivery", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const refused = dependencies({
       send: vi.fn().mockRejectedValue(
         new MemoryReviewOwnerAlertTransportError("failed", "AGENT_TELEGRAM_DELIVERY_REJECTED", "403"),
       ),
     });
-    await createDailyOverviewDispatcher(refused)(morning);
-    expect(refused.release).toHaveBeenCalledWith(person, "2026-09-12");
+    await expect(createDailyOverviewDispatcher(refused)(morning)).resolves.toBe(0);
+    expect(error.mock.calls[0]![0]).toContain("AGENT_DAILY_OVERVIEW_FAILED");
 
     const lost = dependencies({ send: vi.fn().mockRejectedValue(new Error("socket hang up")) });
     await createDailyOverviewDispatcher(lost)(morning);
-    expect(lost.release).not.toHaveBeenCalled();
     expect(lost.record).not.toHaveBeenCalled();
+    expect(error.mock.calls.at(-1)![0]).toContain("AGENT_DAILY_OVERVIEW_AMBIGUOUS");
   });
 
   it("puts the sent overview into the chat's delivery journal so the reply turn sees it", async () => {
@@ -138,7 +137,6 @@ describe("createDailyOverviewDispatcher", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const deps = dependencies({ record: vi.fn().mockRejectedValue(new Error("db down")) });
     await expect(createDailyOverviewDispatcher(deps)(morning)).resolves.toBe(1);
-    expect(deps.release).not.toHaveBeenCalled();
     expect(error.mock.calls[0]![0]).toContain("AGENT_INITIATIVE_DELIVERY_RECORD_FAILED");
   });
 });
