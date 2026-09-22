@@ -78,7 +78,9 @@ export async function reconcileVerifiedGroupMigration(updateId: string) {
     }
     await client.query("DELETE FROM oauth_authorizations WHERE telegram_chat_id=$1 AND status='pending'", [event.oldChatId]);
     await client.query("UPDATE application_conversations SET telegram_chat_id=$2 WHERE telegram_group_id=$1", [group.id,event.newChatId]);
-    await client.query("UPDATE telegram_groups SET telegram_chat_id=$2 WHERE id=$1", [group.id,event.newChatId]);
+    // Telegram migrates only into a supergroup; a learned 'group' type would hide the new address.
+    await client.query("UPDATE telegram_groups SET telegram_chat_id=$2,telegram_chat_type='supergroup' WHERE id=$1",
+      [group.id,event.newChatId]);
     await client.query(`INSERT INTO telegram_group_migrations(family_id,group_id,old_chat_id,new_chat_id,source_update_id)
       VALUES($1,$2,$3,$4,$5)`, [group.family_id,group.id,event.oldChatId,event.newChatId,updateId]);
     await client.query(`INSERT INTO audit_events(family_id,event_type,subject_id,metadata)

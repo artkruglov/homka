@@ -72,6 +72,7 @@ describe("createTelegramHitlCallbackAuthorizer", () => {
     expect(repository.claimCallback).toHaveBeenCalledWith({
       baseContinuationToken: "-1001:55:88",
       callbackData: "eve:0",
+      callbackQueryId: callbackQuery().id,
       telegramChatId: "-1001",
       telegramMessageId: "88",
       telegramUserId: "101",
@@ -83,6 +84,33 @@ describe("createTelegramHitlCallbackAuthorizer", () => {
       reply_markup: { inline_keyboard: [] },
       text: expect.stringContaining("Подтверждено"),
     });
+  });
+
+  it("hands a replayed press's recorded decision to Eve without touching the settled prompt", async () => {
+    const auth = {
+      attributes: { applicationSessionId: "session-1", role: "member" },
+      authenticator: "telegram",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const repository = {
+      claimCallback: vi.fn().mockResolvedValue({
+        auth,
+        continuationToken: "-1001:55:88:osinara:2",
+        promptText: "Удалить файл?",
+        replayed: true,
+        requestIds: ["aitxt-1"],
+        selectedOptionId: "cancel",
+        selectedOptionLabel: "Нет, отменить",
+        status: "authorized",
+      }),
+    };
+    const { context, answerCallbackQuery, request } = telegramContext();
+
+    await expect(createTelegramHitlCallbackAuthorizer(repository)(context, callbackQuery(), "-1001:55:88"))
+      .resolves.toMatchObject({ inputResponses: [{ optionId: "cancel", requestId: "aitxt-1" }] });
+    expect(answerCallbackQuery).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
   });
 
   it.each([

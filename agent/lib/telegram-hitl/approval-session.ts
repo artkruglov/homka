@@ -8,13 +8,16 @@ export interface ApprovalRow extends ApprovalAuthRow {
   callback_data: string[];
   callback_options: unknown;
   consumed_at: Date | null;
+  consumed_callback_query_id: string | null;
   continuation_token: string;
   pending_operation: boolean;
   prompt_text: string | null;
   request_id: string;
   request_kind: "question" | "session-limit" | "tool-approval" | null;
   retired_at: Date | null;
+  selected_option_id: string | null;
   session_eve_session_id: string | null;
+  timed_out_at: Date | null;
 }
 
 // One Telegram prompt may carry every request of a multi-approval step; rows share the message.
@@ -37,6 +40,9 @@ export async function lockApprovals(
             a.callback_data,
             a.callback_options,
             a.consumed_at,
+            a.consumed_callback_query_id,
+            a.selected_option_id,
+            a.timed_out_at,
             a.eve_session_id,
             a.expected_telegram_user_id,
             a.id,
@@ -81,3 +87,24 @@ export function isPendingApproval(row: ApprovalRow): boolean {
     row.session_eve_session_id === row.eve_session_id;
 }
 
+export function isReplayOfConsumedPress(
+  rows: readonly ApprovalRow[],
+  input: { callbackData: string; callbackQueryId?: string; telegramUserId: string },
+  optionId: string,
+): boolean {
+  if (input.callbackQueryId === undefined) return false;
+  // Every row of the prompt was consumed by exactly this press and this button, not by a timeout,
+  // and the session still runs the Eve root that asked.
+  return rows.every((candidate) =>
+    candidate.consumed_at !== null &&
+    candidate.timed_out_at === null &&
+    candidate.consumed_callback_query_id === input.callbackQueryId &&
+    candidate.selected_option_id === optionId &&
+    candidate.expected_telegram_user_id === input.telegramUserId &&
+    candidate.callback_data.includes(input.callbackData) &&
+    candidate.retired_at === null &&
+    candidate.space_policy_current &&
+    candidate.session_eve_session_id === candidate.eve_session_id &&
+    candidate.prompt_text !== null
+  );
+}

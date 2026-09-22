@@ -15,7 +15,12 @@ import {
   resolveCurrentApprovalAuth,
 } from "./approval-auth.js";
 
-import { lockApprovals, isPendingApproval, type ApprovalRow } from "./approval-session.js";
+import {
+  isPendingApproval,
+  isReplayOfConsumedPress,
+  lockApprovals,
+  type ApprovalRow,
+} from "./approval-session.js";
 
 type TelegramChatType = "group" | "private" | "supergroup";
 
@@ -48,6 +53,8 @@ export interface RegisterTelegramHitlApprovalInput {
 export interface ClaimTelegramHitlCallbackInput {
   baseContinuationToken: string;
   callbackData: string;
+  /** Telegram callback query id of this press; the same id may replay its recorded decision. */
+  callbackQueryId?: string;
   telegramChatId: string;
   telegramMessageId: string;
   telegramUserId: string;
@@ -70,6 +77,8 @@ export type TelegramHitlCallbackClaim =
       selectedOptionId: string;
       selectedOptionLabel: string;
       status: "authorized";
+      /** The same press already consumed the prompt; its recorded decision is handed to Eve again. */
+      replayed?: true;
     }
   | { status: "expired" | "forbidden" };
 export type TelegramHitlReplyAuthorization =
@@ -175,6 +184,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
               timeout_attempts = 0,
               selected_option_id = NULL,
               selected_option_label = NULL,
+              consumed_callback_query_id = NULL,
               consumed_at = NULL`,
       [
         input.applicationSessionId,
@@ -239,6 +249,23 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       const rows = await lockApprovals(client, input.telegramChatId, input.telegramMessageId);
       const row = rows[0];
       const selectedOption = row ? selectedCallbackOption(row, input.callbackData) : null;
+      if (row && selectedOption && isReplayOfConsumedPress(rows, input, selectedOption.optionId)) {
+        // The decision was consumed before Eve received it and that delivery failed. The same
+        // update replays the recorded answer under a freshly checked identity; nothing is re-consumed.
+        const auth = await resolveCurrentApprovalAuth(client, row);
+        await client.query("COMMIT");
+        if (!auth) return { status: "forbidden" };
+        return {
+          auth,
+          continuationToken: row.continuation_token,
+          promptText: row.prompt_text!,
+          replayed: true,
+          requestIds: rows.map((candidate) => candidate.request_id),
+          selectedOptionId: selectedOption.optionId,
+          selectedOptionLabel: selectedOption.label,
+          status: "authorized",
+        };
+      }
       // Every row of the prompt must still be answerable: a partially consumed prompt is stale.
       if (
         !row ||
@@ -271,9 +298,15 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       }
       const consumed = await client.query(
         `UPDATE telegram_hitl_approvals
-            SET consumed_at = now(), selected_option_id = $2, selected_option_label = $3
+            SET consumed_at = now(), selected_option_id = $2, selected_option_label = $3,
+                consumed_callback_query_id = $4
           WHERE id = ANY($1::uuid[]) AND consumed_at IS NULL`,
-        [rows.map((candidate) => candidate.id), selectedOption.optionId, selectedOption.label],
+        [
+          rows.map((candidate) => candidate.id),
+          selectedOption.optionId,
+          selectedOption.label,
+          input.callbackQueryId ?? null,
+        ],
       );
       if (consumed.rowCount !== rows.length) {
         await client.query("ROLLBACK");

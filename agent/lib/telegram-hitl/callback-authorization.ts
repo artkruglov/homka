@@ -74,10 +74,23 @@ export function createTelegramHitlCallbackAuthorizer(
     const result = await repository.claimCallback({
       baseContinuationToken: promptRoute,
       callbackData,
+      callbackQueryId: query.id,
       telegramChatId: message.chat.id,
       telegramMessageId: message.messageId,
       telegramUserId: query.from.id,
     });
+    if (result.status === "authorized" && result.replayed) {
+      // The prompt was settled by the first handling of this same press; only Eve still needs it.
+      return {
+        acknowledgementText: "Решение сохранено",
+        auth: result.auth,
+        continuationToken: result.continuationToken,
+        inputResponses: result.requestIds.map((requestId) => ({
+          optionId: result.selectedOptionId,
+          requestId,
+        })),
+      };
+    }
     if (result.status === "authorized") {
       // The decision is already durable in the repository: a failed cosmetic edit, refused by
       // Telegram or lost on the network, must not stop the delivery to Eve, or the person's retry

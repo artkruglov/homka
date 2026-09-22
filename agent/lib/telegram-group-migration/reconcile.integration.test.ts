@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, database } from "../database.js";
 import { telegramIngressRepository } from "../telegram-ingress-repository.js";
+import { telegramRepository } from "../telegram-repository.js";
 import { reconcileVerifiedGroupMigration } from "./reconcile.js";
 
 import { legacyBoundaryQuery } from "../spaces/legacy-space-audit.js";
@@ -38,6 +39,13 @@ suite("operator reconciliation of verified group migration", () => {
     expect((await database().query("SELECT id,telegram_chat_id FROM application_conversations WHERE telegram_group_id=$1", [groupId])).rows[0])
       .toEqual({ id: before.id, telegram_chat_id: "-100456" });
     expect((await database().query("SELECT count(*)::int AS count FROM telegram_group_migrations")).rows[0].count).toBe(1);
+  });
+
+  it("keeps a group whose chat type was already learned reachable at the supergroup address", async () => {
+    const { groupId } = await fixture();
+    await expect(telegramRepository.findGroup("-123", "group")).resolves.toMatchObject({ groupId });
+    await reconcileVerifiedGroupMigration("901");
+    await expect(telegramRepository.findGroup("-100456", "supergroup")).resolves.toMatchObject({ groupId });
   });
 
   it("refuses a separately registered target and rolls back", async () => {

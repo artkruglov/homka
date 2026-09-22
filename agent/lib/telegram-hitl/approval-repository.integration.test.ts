@@ -244,6 +244,39 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     ).rejects.toThrowError(/AGENT_TOOL_APPROVAL_EVIDENCE_INVALID/u);
   });
 
+  it("replays the recorded decision only for the same Telegram callback query", async () => {
+    await fixture();
+    const input = {
+      callbackData: "eve:0",
+      callbackQueryId: "callback-query-1",
+      baseContinuationToken: "-1001:55:88",
+      telegramChatId: "-1001",
+      telegramMessageId: "88",
+      telegramUserId: OWNER_TELEGRAM_ID,
+    };
+
+    await expect(telegramHitlApprovalRepository.claimCallback(input)).resolves.toMatchObject({
+      requestIds: ["approval-request-1"],
+      selectedOptionId: "approve",
+      status: "authorized",
+    });
+    // The first delivery to Eve failed after the decision was consumed; the same update comes again.
+    await expect(telegramHitlApprovalRepository.claimCallback(input)).resolves.toMatchObject({
+      replayed: true,
+      requestIds: ["approval-request-1"],
+      selectedOptionId: "approve",
+      selectedOptionLabel: "Да, подтвердить",
+      status: "authorized",
+    });
+    // A different press, or the other button under the same query id, cannot reuse the decision.
+    await expect(telegramHitlApprovalRepository.claimCallback({ ...input, callbackQueryId: "callback-query-2" }))
+      .resolves.toEqual({ status: "expired" });
+    await expect(telegramHitlApprovalRepository.claimCallback({ ...input, callbackData: "eve:1" }))
+      .resolves.toEqual({ status: "expired" });
+    await expect(telegramHitlApprovalRepository.claimCallback({ ...input, telegramUserId: "someone-else" }))
+      .resolves.toEqual({ status: "expired" });
+  });
+
   it("authorizes execution only for the exact consumed identity-bound tool call", async () => {
     const current = await fixture();
     await telegramHitlApprovalRepository.claimCallback({
