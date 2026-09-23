@@ -91,4 +91,20 @@ describe("task board", () => {
     expect(delivered).toContain("Дело с довольно длинным названием 2");
     expect(taskBoardReply([], NOW, "UTC")).toBeNull();
   });
+
+  it("groups by a named life area instead of the list name", () => {
+    const board = formatTaskBoard({
+      now: NOW, style: "plain", timezone: "UTC",
+      tasks: [
+        task("Записаться на йогу", { lifeArea: "self", listName: "Здоровье" }),
+        task("Купить фильтры", { lifeArea: "home", listName: "Дом" }),
+        task("Отвезти машину", { listName: "Дом" }),
+      ],
+    })!;
+
+    expect(board).toContain("Для себя · 1\n• Записаться на йогу");
+    expect(board).toContain("Дом и забота · 1\n• Купить фильтры");
+    // Дело без метки остаётся в своём списке: сферу проставляет только человек.
+    expect(board).toContain("Дом · 1\n• Отвезти машину");
+  });
 });

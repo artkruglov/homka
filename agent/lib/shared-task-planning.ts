@@ -47,9 +47,10 @@ export async function mutateTaskPlan(client:PoolClient,auth:MemoryAuthorization,
       throw new AppError("AGENT_TASK_DEADLINE_INVALID","Идеи и традиции без срока; у задачи выберите дату или точное время");
     }
     await client.query(`UPDATE shared_tasks SET title=$2,details=$3,list_name=$4,due_at=$5,due_on=$6,
-      version=version+1,updated_at=now() WHERE id=$1`,[task.id,input.title ?? task.title,
+      life_area=$7,version=version+1,updated_at=now() WHERE id=$1`,[task.id,input.title ?? task.title,
       input.details === undefined ? task.details : input.details,
-      input.listName === undefined ? task.list_name : input.listName,dueAt,dueOn]);
+      input.listName === undefined ? task.list_name : input.listName,dueAt,dueOn,
+      input.lifeArea === undefined ? task.life_area : input.lifeArea]);
     // Linked notifications describe the same task, never stale or private appended notes.
     if (input.title !== undefined) await client.query("UPDATE reminders SET content=$2,updated_at=now() WHERE shared_task_id=$1 AND status='active'",[task.id,input.title]);
   }

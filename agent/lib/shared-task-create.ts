@@ -69,8 +69,8 @@ export async function createTask(
   }
   const result = await client.query<{ id: string }>(
     `INSERT INTO shared_tasks(family_id,group_id,scope,creator_telegram_id,assignee_telegram_id,title,due_at,status,kind,list_name,details,due_on,
-       space_id,recurrence_unit,recurrence_interval,recurrence_anchor_on,care_area_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::date,$17) RETURNING id`,
+       space_id,recurrence_unit,recurrence_interval,recurrence_anchor_on,care_area_id,life_area)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::date,$17,$18) RETURNING id`,
     [auth.familyId, scope === "group" ? auth.groupId : null, scope, auth.telegramUserId, assignee,
       input.title, input.dueAt ?? null,
       assignee === null ? "open" : assignee === auth.telegramUserId ? "accepted" : "proposed",
@@ -80,7 +80,7 @@ export async function createTask(
       spaceId, input.repeat?.unit ?? null, input.repeat?.interval ?? null,
       // Якорь повтора это первая дата: от неё считаются все следующие, поэтому один
       // пропуск не сдвигает всё правило.
-      input.repeat ? input.dueOn ?? null : null, careAreaId],
+      input.repeat ? input.dueOn ?? null : null, careAreaId, input.lifeArea ?? null],
   );
   return result.rows[0]!.id;
 }

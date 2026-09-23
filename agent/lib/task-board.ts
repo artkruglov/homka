@@ -14,10 +14,13 @@
  * Здесь порядок один и тот же: просроченное, сегодня, затем все открытые дела по спискам,
  * идеи отдельно как «Когда-нибудь», просьбы другим отдельно. Одно дело на строку.
  */
+import { lifeAreaTitle, type LifeArea } from "./life-areas.js";
 import { TELEGRAM_KEEP_OPEN_DIRECTIVE } from "./telegram-final-presentation.js";
 
 export interface BoardTask {
   readonly title: string;
+  /** Сфера жизни, если человек её назвал: она становится заголовком вместо имени списка. */
+  readonly lifeArea?: LifeArea | null;
   readonly status: string;
   readonly kind: string;
   readonly listName: string | null;
@@ -114,11 +117,12 @@ export function formatTaskBoard(input: TaskBoardInput): string | null {
 
   section("⚠️ Просрочено", overdue, (task) => item(task, ` — срок ${shortDate(dueDay(task, input.timezone)!)}`));
   section("Сегодня", todays, (task) => item(task));
-  // Список это группа дел по смыслу; одинаковое имя в разных областях это разные списки.
+  // Сфера жизни говорит о деле больше, чем имя списка, поэтому при метке заголовком становится
+  // она. Список это группа дел по смыслу; одинаковое имя в разных областях это разные списки.
   const groups = new Map<string, BoardTask[]>();
   for (const task of rest) {
-    const name = task.listName ?? NO_LIST;
-    const key = task.source === PERSONAL_SOURCE ? name : `${name} (${task.source})`;
+    const name = task.lifeArea ? lifeAreaTitle(task.lifeArea) : task.listName ?? NO_LIST;
+    const key = task.lifeArea || task.source === PERSONAL_SOURCE ? name : `${name} (${task.source})`;
     groups.set(key, [...(groups.get(key) ?? []), task]);
   }
   const ordered = [...groups.entries()].sort(([a], [b]) =>
