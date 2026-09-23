@@ -134,7 +134,8 @@ function stubResult(input: Record<string, unknown>, environment: Case["environme
   }
   if (input.action === "list") return { incomplete: false, nextCursor: null, tasks: REGISTRY, truncated: false };
   if (input.action === "batch") {
-    return { replayed: false, tasks: (input.items as Record<string, unknown>[]).map((item, index) => ({
+    return { applied: (input.items as unknown[]).length, note: "Пакет применён целиком. Не повторяй его пункты по одному",
+      replayed: false, tasks: (input.items as Record<string, unknown>[]).map((item, index) => ({
       id: item.id ?? `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, source,
       status: item.action === "create" ? (item.unassigned ? "open" : "accepted") : "completed", title: item.title ?? "дело" })) };
   }

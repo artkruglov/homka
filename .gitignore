@@ -6,6 +6,8 @@ node_modules
 .workflow-data
 .output
 .runtime
+# Входы и отчёты эвалов: там лежат настоящие сообщения людей.
+.tmp
 .nitro
 coverage
 dist
