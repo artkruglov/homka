@@ -92,6 +92,33 @@ describe("model-facing approval boundary", () => {
   }
   const context = { toolInput: {}, toolName: "approval_tool" } as never;
 
+  it("stops calling a tool that keeps failing in one turn, whatever the arguments", async () => {
+    // 22 сентября 2026 продуктовый каталог отвечал отказом, а модель звала его 21 раз подряд с
+    // новыми запросами: отпечаток «инструмент и аргументы» такую петлю не видит.
+    const failing = defineTool({
+      description: "Failing tool",
+      inputSchema: z.object({ query: z.string() }).strict(),
+      execute: () => { throw new Error("AGENT_GROCERY_UNAVAILABLE: сервис недоступен"); },
+    }) as ToolDefinition<any, any>;
+    const wrapped = wrapModelFacingTool("grocery_cart", failing);
+    const ctx = { session: { id: "wrun_fail", turn: { id: "turn_1" } } } as never;
+
+    for (const query of ["молоко", "хлеб", "сыр"]) {
+      await expect(wrapped.execute({ query }, ctx)).rejects.toMatchObject({
+        code: "AGENT_GROCERY_UNAVAILABLE",
+      });
+    }
+    await expect(wrapped.execute({ query: "масло" }, ctx)).rejects.toMatchObject({
+      code: "AGENT_TOOL_FAILING_REPEATEDLY",
+    });
+
+    // Другой ход начинается с чистого счёта, а удачный вызов снимает счёт в своём.
+    const next = { session: { id: "wrun_fail", turn: { id: "turn_2" } } } as never;
+    await expect(wrapped.execute({ query: "масло" }, next)).rejects.toMatchObject({
+      code: "AGENT_GROCERY_UNAVAILABLE",
+    });
+  });
+
   it("turns an application input error thrown by the approval policy into a denial", async () => {
     const wrapped = wrapModelFacingTool("approval_tool", approvalTool(() => {
       throw new AppError("AGENT_TEST_INPUT_INVALID", "Передайте toolAllowlist массивом");

@@ -115,7 +115,11 @@ function requireCreateInput(input: Record<string, unknown>) {
     }),
     firstRunAt: requiredIsoDate(input, "firstRunAt", INPUT_ERROR_CODE),
     recurrence: requireReminderRecurrence(input.recurrence),
-    scope: requiredEnum(input, "scope", SCOPES, INPUT_ERROR_CODE) as ReminderScope,
+    // Область по умолчанию задаёт чат: в личном чате напоминание личное, в семейной группе
+    // семейное. Модель забывала поле, и создание падало на валидации (бэклог 22 сентября 2026).
+    scope: input.scope === undefined
+      ? undefined
+      : requiredEnum(input, "scope", SCOPES, INPUT_ERROR_CODE) as ReminderScope,
     timezone: requiredString(input, "timezone", INPUT_ERROR_CODE, "Europe/Moscow", { maxLength: 100 }),
   };
 }
@@ -171,7 +175,7 @@ function requireManageReminderInput(input: unknown) {
 const TOOL_DESCRIPTION = [
   "Личный сигнал: taskId из manage_shared_tasks, content равен title. Для своего принятого дела/традиции это напоминание о выполнении; для своей просьбы proposed проверка ответа, которая остановится после ответа. Чужому исполнителю сигнал не назначай. Создавай только по просьбе: дата задачи уведомление не создаёт.",
   "Создать, изменить, приостановить, возобновить или удалить обычное напоминание с текстом уведомления. Для автономного запуска агента с исследованием или отчётом используй manage_agent_schedule. Перед update/pause/resume/delete найди id через list_reminders; повторение меняй через update, не пересоздавай.",
-  "Create: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}. Повтор: {\"unit\":\"daily\",\"interval\":1}, unit также weekly или monthly; без повтора recurrence=null.",
+  "Create: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":null}; scope personal или family, по умолчанию область чата. Повтор: {\"unit\":\"daily\",\"interval\":1}, unit также weekly или monthly; без повтора recurrence=null.",
   "Update передаёт id и только изменяемые content, firstRunAt или recurrence; pause/delete только action и id; resume принимает необязательный firstRunAt, обязательный для завершённого напоминания. firstRunAt в ISO с UTC offset, timezone IANA.",
 ].join(" ");
 
@@ -186,9 +190,12 @@ export default defineTool({
     const parsed = requireManageReminderInput(input);
     const authorization = requireReminderAuthorization(ctx);
     if (parsed.action === "create") {
+      const scope: ReminderScope = parsed.values.scope
+        ?? (authorization.telegramChatType === "private" ? "personal" : "family");
       return await reminderRepository.create(authorization, {
         ...parsed.values,
         operationKey: ctx.callId,
+        scope,
       });
     }
     if (parsed.action === "update") {

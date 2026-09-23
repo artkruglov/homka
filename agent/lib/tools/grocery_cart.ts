@@ -20,7 +20,9 @@ import {
   GROCERY_CART_MAX_ITEMS,
   GROCERY_CART_MAX_QUANTITY,
   GROCERY_CART_MIN_QUANTITY,
+  GROCERY_BATCH_ITEMS_PER_QUERY,
   GROCERY_SEARCH_MAX_ITEMS,
+  GROCERY_SEARCH_MAX_QUERIES,
 } from "../grocery/grocery-config.js";
 import { callGroceryCatalog } from "../grocery/grocery-throttle.js";
 import {
@@ -40,21 +42,28 @@ export const groceryCartInput = z.object({
   })).min(1).max(GROCERY_CART_MAX_ITEMS).optional(),
   page: z.number().int().min(1).max(99).optional(),
   productId: productId.optional(),
+  queries: z.array(z.string().trim().min(1).max(200)).min(1).max(GROCERY_SEARCH_MAX_QUERIES).optional(),
   query: z.string().trim().min(1).max(200).optional(),
   sort: z.enum(["price_asc", "price_desc", "rating", "popularity", "new"]).optional(),
 }).strict().superRefine((value, ctx) => {
   const fields: Record<string, string[]> = {
     details: ["productId"],
     link: ["items"],
-    search: ["query", "sort", "page"],
+    search: ["queries", "query", "sort", "page"],
   };
   for (const key of Object.keys(value)) {
     if (key !== "action" && !fields[value.action]!.includes(key)) {
       ctx.addIssue({ code: "custom", message: `Недопустимое поле ${key} для ${value.action}` });
     }
   }
-  if (value.action === "search" && !value.query) {
-    ctx.addIssue({ code: "custom", message: "Для search нужен query" });
+  if (value.action === "search" && !value.query && !value.queries) {
+    ctx.addIssue({ code: "custom", message: "Для search нужен query или queries" });
+  }
+  if (value.query && value.queries) {
+    ctx.addIssue({ code: "custom", message: "Передайте либо query, либо queries" });
+  }
+  if (value.queries && value.page !== undefined) {
+    ctx.addIssue({ code: "custom", message: "page работает только с одним query" });
   }
   if (value.action === "details" && value.productId === undefined) {
     ctx.addIssue({ code: "custom", message: "Для details нужен productId из search" });
@@ -67,7 +76,7 @@ export const groceryCartInput = z.object({
 export default defineTool({
   description: [
     "Каталог продуктов ВкусВилла: search находит товары по запросу, details показывает состав и КБЖУ одного товара, link собирает ссылку на корзину.",
-    "search: query обязателен; sort price_asc|price_desc|rating|popularity|new; page для следующей страницы. В выдаче productId, название, цена, единица и рейтинг.",
+    `search: query для одного названия или queries до ${GROCERY_SEARCH_MAX_QUERIES} названий сразу (весь список покупок одним вызовом, по ${GROCERY_BATCH_ITEMS_PER_QUERY} товара на название); sort price_asc|price_desc|rating|popularity|new; page только с одним query. В выдаче productId, название, цена, единица и рейтинг.`,
     "details: productId из выдачи search.",
     `link: items от одной до ${GROCERY_CART_MAX_ITEMS} позиций, каждая productId и quantity (${GROCERY_CART_MIN_QUANTITY}..${GROCERY_CART_MAX_QUANTITY}). Возвращает ссылку на корзину.`,
     "Ссылку отправь человеку целиком и скажи, что заказ он оформляет сам: адрес доставки и оплата остаются в его аккаунте ВкусВилла, у бота доступа к ним нет.",
@@ -78,8 +87,21 @@ export default defineTool({
   async execute(input,ctx) {
     return withIntegrationSpace(requireMemoryAuthorization(ctx),async()=>{
     if (input.action === "search") {
+      const sort = input.sort ?? "popularity";
+      if (input.queries) {
+        // Запросы идут по одному: у источника общий ограничитель частоты, и параллельный залп
+        // только ускорил бы отказ. Экономится шаг модели, а не запрос к источнику.
+        const found: { query: string; items: unknown }[] = [];
+        for (const query of input.queries) {
+          const result = await callGroceryCatalog("vkusvill_products_search", {
+            mode: "short", page: 1, q: query, sort,
+          });
+          found.push({ items: groceryItems(result, GROCERY_BATCH_ITEMS_PER_QUERY), query });
+        }
+        return { found };
+      }
       const result = await callGroceryCatalog("vkusvill_products_search", {
-        mode: "short", page: input.page ?? 1, q: input.query!, sort: input.sort ?? "popularity",
+        mode: "short", page: input.page ?? 1, q: input.query!, sort,
       });
       return groceryItems(result, GROCERY_SEARCH_MAX_ITEMS);
     }

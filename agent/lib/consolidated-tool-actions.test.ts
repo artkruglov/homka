@@ -72,6 +72,14 @@ describe("consolidated tool action schemas", () => {
       scope: "personal",
       timezone: "Europe/Moscow",
     }).success).toBe(true);
+    // Область не обязательна: её задаёт чат, а модель это поле забывала.
+    expect(schema.safeParse({
+      action: "create",
+      content: "Позвонить",
+      firstRunAt: "2026-08-01T10:00:00+03:00",
+      recurrence: null,
+      timezone: "Europe/Moscow",
+    }).success).toBe(true);
     expect(schema.safeParse({ action: "pause", id: ID }).success).toBe(true);
     expect(schema.safeParse({ action: "resume", id: ID }).success).toBe(true);
     expect(schema.safeParse({ action: "delete", id: ID }).success).toBe(true);

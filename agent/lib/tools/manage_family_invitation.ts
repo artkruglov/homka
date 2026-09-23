@@ -89,7 +89,7 @@ function requireManageFamilyInvitationInput(input: unknown) {
 
 const TOOL_DESCRIPTION = [
   "Создать одноразовое семейное приглашение или подтвердить кандидата; оба action требуют подтверждения. Create: {\"action\":\"create\"} без полей кандидата.",
-  "Set_relation: {\"action\":\"set_relation\",\"participantRef\":\"<ref из participants>\",\"relation\":\"partner|parent|child|other\"} по явным словам владельца о том, кто ему кто; кнопки не требует, прав не меняет, нужна, чтобы вопросы про пару не уходили родителю.",
+  "Set_relation: сначала возьми participantRef вызовом manage_shared_tasks {\"action\":\"participants\"}, имя в ref не превращай; затем {\"action\":\"set_relation\",\"participantRef\":\"<uuid оттуда>\",\"relation\":\"partner|parent|child|other\"} по явным словам владельца о том, кто ему кто. Кнопки не требует, прав не меняет; нужна, чтобы вопросы про пару не уходили родителю.",
   "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID из list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}; все три значения берутся точно из list_pending_family_invitations, иначе запроси список снова или спроси владельца.",
 ].join(" ");
 

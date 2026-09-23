@@ -12,10 +12,16 @@
  *   repeats the exact call after a failure learns nothing new, and one such loop ran a family
  *   member's turn to the 32-step limit. The second identical call is refused before it executes,
  *   with the correction to change the call or report to the person.
+ * - Разные аргументы отпечаток не ловит: 22 сентября 2026 продуктовый каталог отвечал отказом, а
+ *   модель звала его 21 раз подряд с новыми запросами. Поэтому у каждого инструмента есть ещё и
+ *   счёт падений за ход: после третьего он в этом ходе больше не вызывается.
  */
 import { createHash } from "node:crypto";
 
 export const TOOL_REPEAT_WITHOUT_PROGRESS_CODE = "AGENT_TOOL_REPEAT_WITHOUT_PROGRESS";
+export const TOOL_FAILING_REPEATEDLY_CODE = "AGENT_TOOL_FAILING_REPEATEDLY";
+/** Сколько падений одного инструмента за ход считается «он сейчас не работает». */
+export const TOOL_TURN_FAILURE_LIMIT = 3;
 
 const MAX_TRACKED_TURNS = 500;
 
@@ -37,13 +43,16 @@ export function toolCallFingerprint(toolName: string, input: unknown): string {
 
 export interface ToolRepeatGuard {
   forget(turnKey: string): void;
-  recordFailure(turnKey: string, fingerprint: string): void;
-  recordSuccess(turnKey: string, fingerprint: string): void;
+  recordFailure(turnKey: string, fingerprint: string, toolName?: string): void;
+  recordSuccess(turnKey: string, fingerprint: string, toolName?: string): void;
   refuses(turnKey: string, fingerprint: string): boolean;
+  /** Инструмент падал в этом ходе столько раз, что следующий вызов заведомо не поможет. */
+  exhausted(turnKey: string, toolName: string): boolean;
 }
 
 export function createToolRepeatGuard(maxTurns = MAX_TRACKED_TURNS): ToolRepeatGuard {
   const failed = new Map<string, Set<string>>();
+  const failureCounts = new Map<string, Map<string, number>>();
   const turnFailures = (turnKey: string): Set<string> => {
     const existing = failed.get(turnKey);
     if (existing) return existing;
@@ -59,14 +68,24 @@ export function createToolRepeatGuard(maxTurns = MAX_TRACKED_TURNS): ToolRepeatG
   };
 
   return {
+    exhausted(turnKey, toolName) {
+      return (failureCounts.get(turnKey)?.get(toolName) ?? 0) >= TOOL_TURN_FAILURE_LIMIT;
+    },
     forget(turnKey) {
       failed.delete(turnKey);
+      failureCounts.delete(turnKey);
     },
-    recordFailure(turnKey, fingerprint) {
+    recordFailure(turnKey, fingerprint, toolName) {
       turnFailures(turnKey).add(fingerprint);
+      if (toolName === undefined) return;
+      const counts = failureCounts.get(turnKey) ?? new Map<string, number>();
+      counts.set(toolName, (counts.get(toolName) ?? 0) + 1);
+      failureCounts.set(turnKey, counts);
     },
-    recordSuccess(turnKey, fingerprint) {
+    recordSuccess(turnKey, fingerprint, toolName) {
       failed.get(turnKey)?.delete(fingerprint);
+      // Удачный вызов доказывает, что инструмент работает: счёт падений начинается заново.
+      if (toolName !== undefined) failureCounts.get(turnKey)?.delete(toolName);
     },
     refuses(turnKey, fingerprint) {
       return failed.get(turnKey)?.has(fingerprint) ?? false;

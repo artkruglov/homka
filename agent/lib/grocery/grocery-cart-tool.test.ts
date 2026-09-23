@@ -64,6 +64,25 @@ describe("grocery cart tool", () => {
     });
   });
 
+  it("looks up a whole shopping list in one call instead of one call per item", async () => {
+    // 22 сентября 2026 список из тринадцати позиций стал тринадцатью вызовами подряд.
+    call.mockImplementation(async (_tool: string, args: { q: string }) => ({
+      data: { items: [{ name: args.q, price: { current: 100 }, unit: "шт", xml_id: 1 }] },
+      ok: true,
+    }));
+
+    const found = await run({ action: "search", queries: ["молоко", "хлеб", "сыр"] }) as {
+      found: { items: { items: { name: string }[] }; query: string }[];
+    };
+
+    expect(found.found.map((entry) => entry.query)).toEqual(["молоко", "хлеб", "сыр"]);
+    expect(found.found[0]!.items.items[0]!.name).toBe("молоко");
+    expect(call).toHaveBeenCalledTimes(3);
+    // Пакет и одиночный запрос вместе не принимаются, страница только у одиночного.
+    expect(groceryCartInput.safeParse({ action: "search", queries: ["хлеб"], query: "сыр" }).success).toBe(false);
+    expect(groceryCartInput.safeParse({ action: "search", queries: ["хлеб"], page: 2 }).success).toBe(false);
+  });
+
   it("rejects a merged quantity above the limit without creating a smaller basket", async () => {
     await expect(run({
       action: "link",

@@ -108,7 +108,7 @@ export const familyRepository: FamilyRepository = {
       if (updated.rowCount !== 1) {
         throw new AppError(
           "AGENT_FAMILY_RELATION_INVALID",
-          "Не нашла этого участника семьи. Возьмите participantRef из списка участников",
+          "Не нашла этого участника семьи. Возьмите participantRef из manage_shared_tasks action participants и повторите",
         );
       }
       await client.query(

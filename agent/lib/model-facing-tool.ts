@@ -20,6 +20,7 @@ import {
 import {
   TOOL_REPEAT_WITHOUT_PROGRESS_CODE,
   toolCallFingerprint,
+  TOOL_FAILING_REPEATEDLY_CODE,
   toolRepeatGuard,
 } from "./tool-repeat-guard.js";
 
@@ -31,6 +32,19 @@ function turnKey(ctx: unknown): string | null {
     ?.session;
   if (typeof session?.id !== "string" || typeof session.turn?.id !== "string") return null;
   return `${session.id}:${session.turn.id}`;
+}
+
+function failingRepeatedlyError(toolName: string): ModelFacingError {
+  return new ModelFacingError({
+    category: "operation",
+    code: TOOL_FAILING_REPEATEDLY_CODE,
+    correction:
+      `${toolName} уже несколько раз подряд завершился ошибкой в этом ходе. ` +
+      "Больше его не вызывайте: скажите человеку, что сейчас не получается, и что вы можете сделать без него.",
+    reason: "Инструмент подряд отказывает в этом ходе; следующий вызов не даст нового результата.",
+    retryable: false,
+    sideEffectStatus: "not_started",
+  });
 }
 
 function repeatWithoutProgressError(toolName: string): ModelFacingError {
@@ -81,15 +95,24 @@ export function wrapModelFacingTool(
       if (turn !== null && fingerprint !== null && toolRepeatGuard.refuses(turn, fingerprint)) {
         throw repeatWithoutProgressError(toolName);
       }
+      // Новые аргументы не помогают, когда не работает сам инструмент: продуктовый каталог
+      // 22 сентября 2026 отвечал отказом, а модель звала его 21 раз подряд.
+      if (turn !== null && toolRepeatGuard.exhausted(turn, toolName)) {
+        throw failingRepeatedlyError(toolName);
+      }
       let output: unknown;
       try {
         await requireToolSpaceAccess(ctx);
         output = await definition.execute(input, ctx);
       } catch (error) {
-        if (turn !== null && fingerprint !== null) toolRepeatGuard.recordFailure(turn, fingerprint);
+        if (turn !== null && fingerprint !== null) {
+          toolRepeatGuard.recordFailure(turn, fingerprint, toolName);
+        }
         throw normalizeModelFacingError(error, { toolName });
       }
-      if (turn !== null && fingerprint !== null) toolRepeatGuard.recordSuccess(turn, fingerprint);
+      if (turn !== null && fingerprint !== null) {
+        toolRepeatGuard.recordSuccess(turn, fingerprint, toolName);
+      }
       return withDeliveredNoticeNote(output, ctx);
     },
   });

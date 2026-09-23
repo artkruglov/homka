@@ -30,7 +30,9 @@ vi.mock("../grocery/grocery-config.js", () => ({
   GROCERY_CART_MIN_QUANTITY: 0.01,
   GROCERY_MCP_URL: "https://example.test/mcp",
   GROCERY_REQUEST_TIMEOUT_MS: 15_000,
+  GROCERY_BATCH_ITEMS_PER_QUERY: 4,
   GROCERY_SEARCH_MAX_ITEMS: 10,
+  GROCERY_SEARCH_MAX_QUERIES: 8,
 }));
 vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
