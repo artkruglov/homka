@@ -50,7 +50,28 @@ describe("task board", () => {
   it("marks headings bold for a model answer and keeps a title from breaking them", () => {
     const board = formatTaskBoard({ now: NOW, style: "rich", timezone: "UTC", tasks: [task("Купить **всё**", { listName: "Дом" })] })!;
 
-    expect(board).toContain("**Дом · 1**\n• Купить \\*\\*всё\\*\\*");
+    expect(board).toContain("**Дом · 1**\n\n- Купить \\*\\*всё\\*\\*");
+  });
+
+  it("gives a model answer real Markdown blocks, because a lone newline is only a space there", () => {
+    // Прод 23 сентября 2026: доска ушла моделью дословно, но Telegram отрисовал её как Rich
+    // Markdown, склеил строки секции в абзац, и человек получил стену текста.
+    const tasks = [task("Отвезти матрас", { listName: "Дом" }), task("Зарядить аккумулятор", { listName: "Дом" })];
+    const rich = formatTaskBoard({ now: NOW, style: "rich", tasks, timezone: "UTC" })!;
+
+    expect(rich).toContain("**Дом · 2**\n\n- Отвезти матрас\n- Зарядить аккумулятор");
+    expect(rich).not.toContain("•");
+    // Простое сообщение служб уходит без разметки, там перевод строки работает сам по себе.
+    const plain = formatTaskBoard({ now: NOW, style: "plain", tasks, timezone: "UTC" })!;
+
+    expect(plain).toContain("Дом · 2\n• Отвезти матрас\n• Зарядить аккумулятор");
+  });
+
+  it("keeps an overflow tail out of the last list item", () => {
+    const tasks = Array.from({ length: 7 }, (_, index) => task(`Дело ${index + 1}`, { listName: "Дом" }));
+    const rich = formatTaskBoard({ now: NOW, perGroup: 2, style: "rich", tasks, timezone: "UTC" })!;
+
+    expect(rich).toContain("- Дело 2\n\n…и ещё 5");
   });
 
   it("never lets a task title become markup in someone else's board", () => {

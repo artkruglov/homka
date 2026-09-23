@@ -96,7 +96,13 @@ export function formatTaskBoard(input: TaskBoardInput): string | null {
   const perGroup = input.perGroup ?? 5;
   const today = localDate(input.timezone, input.now);
   const heading = (text: string) => input.style === "rich" ? `**${text}**` : text;
-  const item = (task: BoardTask, suffix = "") => `• ${cleanTaskTitle(task.title, input.style)}${suffix}${note(task)}`;
+  // Ответ модели уходит как Telegram Rich Markdown, где одиночный перевод строки это пробел:
+  // строки секции склеивались в абзац. В разметке каждая строка обязана быть своим блоком,
+  // поэтому там настоящий список `-` и пустая строка после заголовка. Служебное сообщение
+  // (утренний обзор) уходит без разметки, и ему нужен ровно обратный, дословный вид.
+  const rich = input.style === "rich";
+  const item = (task: BoardTask, suffix = "") =>
+    `${rich ? "-" : "•"} ${cleanTaskTitle(task.title, input.style)}${suffix}${note(task)}`;
 
   const open = input.tasks.filter((task) => OPEN_TASK_STATUSES.has(task.status));
   const commitments = open.filter((task) => task.kind === "task");
@@ -112,7 +118,10 @@ export function formatTaskBoard(input: TaskBoardInput): string | null {
     if (tasks.length === 0) return;
     const shown = tasks.slice(0, perGroup).map(line);
     const more = tasks.length - shown.length;
-    sections.push([heading(`${title} · ${tasks.length}`), ...shown, ...(more > 0 ? [`…и ещё ${more}`] : [])]);
+    // Хвост «…и ещё N» это отдельный абзац: без пустой строки разметка считает его продолжением
+    // последнего пункта списка и печатает его внутри пункта.
+    sections.push([heading(`${title} · ${tasks.length}`), ...(rich ? [""] : []), ...shown,
+      ...(more > 0 ? [...(rich ? [""] : []), `…и ещё ${more}`] : [])]);
   };
 
   section("⚠️ Просрочено", overdue, (task) => item(task, ` — срок ${shortDate(dueDay(task, input.timezone)!)}`));

@@ -11,7 +11,10 @@ import { modeInstructions } from "./mode-instructions.js";
 // called belong in that tool's descriptor or skill, not here.
 // Raised by 300 on 5 September 2026 for the owner's rule on mild, self-invented swearing.
 // Raised by 400 on 9 September 2026: style records are a hint, not a promise; namesakes by username.
-const CORE_CHARACTER_BUDGET = 11_700;
+// Raised by 1200 on 24 September 2026 for the Telegram formatting guide. The inventory of allowed
+// markup was there, but nothing said how to compose a readable answer — and nothing said that a
+// lone newline is a space in Rich Markdown, which is what flattened the task board in production.
+const CORE_CHARACTER_BUDGET = 12_900;
 // Raised by 200 on 8 September 2026 for the mandatory used-memory directive wording, including
 // the "after the answer, not instead of it" clause added after the directive-only eval case.
 // Raised by 900 on 11 September 2026: раздел про дела, желания и традиции переехал сюда из
