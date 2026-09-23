@@ -56,11 +56,22 @@ describe("batch of planner actions", () => {
     expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"create",title:"Шторы"},{action:"create",title:"Продать опель",listName:"Дом"}]}).success).toBe(true);
     expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"complete",id:id(1)},{action:"cancel",id:id(2)}]}).success).toBe(true);
   });
-  it("rejects empty, oversized, nested, edit and duplicate batches", () => {
+  it("accepts edits, plans and a ritual note as batch items", () => {
+    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"update",id:id(1),version:1,title:"Шторы"},
+      {action:"update",id:id(2),version:3,listName:"Дом"}]}).success).toBe(true);
+    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"plan",id:id(1),plannedFrom:"2026-09-23",plannedUntil:"2026-09-24"},
+      {action:"unplan",id:id(2)}]}).success).toBe(true);
+    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"record",id:id(1),occurredOn:"2026-09-21",note:"пили чай"}]}).success).toBe(true);
+    // Правка без version отвергается в пакете так же, как в одиночном вызове.
+    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"update",id:id(1),title:"x"}]}).success).toBe(false);
+  });
+  it("rejects empty, oversized, nested, handover and duplicate batches", () => {
     expect(sharedTaskInput.safeParse({action:"batch",items:[]}).success).toBe(false);
     expect(sharedTaskInput.safeParse({action:"batch",items:Array.from({length:21},(_,i)=>({action:"create",title:`t${i}`}))}).success).toBe(false);
     expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"batch",items:[]}]}).success).toBe(false);
-    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"update",id:id(1),version:1,title:"x"}]}).success).toBe(false);
+    // Передача меняет, кто кому должен, и ждёт согласия второго: она остаётся одиночным вызовом.
+    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"transfer",id:id(1),version:1,assigneeRef:id(3)}]}).success).toBe(false);
+    expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"release",id:id(1),version:1}]}).success).toBe(false);
     expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"complete",id:id(1)},{action:"cancel",id:id(1)}]}).success).toBe(false);
     expect(sharedTaskInput.safeParse({action:"batch",items:[{action:"complete",id:id(1),title:"x"}]}).success).toBe(false);
     expect(sharedTaskInput.safeParse({action:"create",title:"x",items:[]}).success).toBe(false);

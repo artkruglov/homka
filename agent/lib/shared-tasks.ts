@@ -12,8 +12,14 @@ const date = z.iso.date().refine(value => {
 export const UNFINISHED_TASK_STATUSES: readonly string[] = ["open", "proposed", "accepted"];
 /** Завершённые: отдельное представление «Завершённые», а не хвост общего списка. */
 export const CLOSED_TASK_STATUSES: readonly string[] = ["completed", "cancelled", "declined"];
-/** Пакет меняет несколько дел одним вызовом: список из сообщения создаётся или закрывается целиком. */
-export const BATCH_ITEM_ACTIONS: readonly string[] = ["create", "claim", "accept", "decline", "complete", "cancel", "reopen"];
+/**
+ * Пакет меняет несколько дел одним вызовом: список из сообщения создаётся, закрывается или
+ * правится целиком. Правки вошли сюда 23 сентября 2026: за 14 дней прода пакет не был вызван ни
+ * разу, а самый длинный ход — 18 подряд `update` — состоял ровно из того, чего пакет не принимал.
+ * Передача дела и release остаются одиночными: они меняют, кто кому должен, и ждут согласия.
+ */
+export const BATCH_ITEM_ACTIONS: readonly string[] = ["create", "claim", "accept", "decline", "complete",
+  "cancel", "reopen", "update", "clarify", "plan", "unplan", "activate", "record"];
 export const BATCH_MAX_ITEMS = 20;
 
 const sharedTaskFields = z.object({

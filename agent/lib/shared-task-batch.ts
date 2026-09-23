@@ -18,7 +18,8 @@ import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import type { SharedTaskInput } from "./shared-tasks.js";
 import { authorize, denied, present, readTasks } from "./shared-task-access.js";
 import { createTask } from "./shared-task-create.js";
-import { applyTaskStatus, lockTaskForChange, type StatusAction } from "./shared-task-transition.js";
+import { mutateTaskPlan } from "./shared-task-planning.js";
+import { applyTaskStatus, lockTaskForChange, STATUS_ACTIONS, type StatusAction } from "./shared-task-transition.js";
 import { requireSpaceAction } from "./spaces/space-write.js";
 import { lockTaskSpaceBoundary, taskSpaceAction } from "./spaces/task-space-action.js";
 
@@ -76,7 +77,7 @@ export async function executeTaskBatch(auth: MemoryAuthorization, input: SharedT
       const taskByKey = new Map(previous.rows.map((row) => [row.operation_key, row.task_id]));
       const tasks = await readInOrder(client, auth, scope, keys.map((key) => taskByKey.get(key)!));
       await client.query("COMMIT");
-      return { tasks, replayed: true };
+      return { applied: tasks.length, note: "Пакет применён целиком. Не повторяй его пункты по одному", tasks, replayed: true };
     }
     const taskIds: string[] = [];
     const failures: { index: number; code: string }[] = [];
@@ -89,7 +90,13 @@ export async function executeTaskBatch(auth: MemoryAuthorization, input: SharedT
           taskIds[index] = await createTask(client, auth, scope, spaceId, item);
         } else {
           const task = await lockTaskForChange(client, auth, scope, item);
-          await applyTaskStatus(client, auth, task, item.action as StatusAction);
+          // Правка, план и отметка традиции идут тем же путём, что и в одиночном вызове: пакет
+          // не знает о них ничего своего и потому не может разойтись с ним в правах.
+          if ((STATUS_ACTIONS as readonly string[]).includes(item.action)) {
+            await applyTaskStatus(client, auth, task, item.action as StatusAction);
+          } else {
+            await mutateTaskPlan(client, auth, task, item);
+          }
           taskIds[index] = task.id;
         }
         await client.query("RELEASE SAVEPOINT task_batch_item");
@@ -118,7 +125,10 @@ export async function executeTaskBatch(auth: MemoryAuthorization, input: SharedT
     }
     const tasks = await readInOrder(client, auth, scope, taskIds);
     await client.query("COMMIT");
-    return { tasks, replayed: false };
+    // Эвал 23 сентября: собрав верный пакет из трёх закрытий, модель в половине сэмплов повторила
+    // те же три поодиночке. Ответ говорит, что делать больше нечего, прямо в точке решения:
+    // в описании инструмента этой строке места нет, а повтор на проде стоил бы трёх отказов.
+    return { applied: tasks.length, note: "Пакет применён целиком. Не повторяй его пункты по одному", tasks, replayed: false };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

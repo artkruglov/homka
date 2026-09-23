@@ -81,6 +81,31 @@ suite('planner user stories',()=>{
     expect((await database().query("SELECT count(*)::int n FROM shared_task_versions WHERE action='complete'")).rows[0].n).toBe(2);
     expect((await tasks.execute(owner,{action:'list'},'read')).tasks!.map(t=>t.id)).toEqual([c.id]);
   });
+  it('edits and plans several tasks in one batch, and one stale version stops all of them',async()=>{
+    // Прод 14 сентября: один ход потратил 18 подряд `update`, потому что правка не шла в пакет.
+    const [a,b]=[await makeTask(owner,'Отвезти матрас'),await makeTask(owner,'Зарядить аккумулятор')];
+    const edited=await tasks.execute(owner,{action:'batch',items:[
+      {action:'update',id:a.id,version:a.version,listName:'Переезд'},
+      {action:'update',id:b.id,version:b.version,title:'Зарядить аккумулятор опеля'},
+    ]} as never,'edit-two');
+    expect(edited.tasks!.map(t=>t.title)).toEqual(['Отвезти матрас','Зарядить аккумулятор опеля']);
+    expect((await database().query("SELECT count(*)::int n FROM shared_task_versions WHERE action='update'")).rows[0].n).toBe(2);
+    const planned=await tasks.execute(owner,{action:'batch',items:[
+      {action:'plan',id:a.id,plannedFrom:'2026-09-23',plannedUntil:'2026-09-24'},
+      {action:'plan',id:b.id,plannedFrom:'2026-09-25',plannedUntil:'2026-09-25'},
+    ]} as never,'plan-two');
+    expect(planned.tasks!.length).toBe(2);
+    expect((await database().query("SELECT count(*)::int n FROM shared_task_plans")).rows[0].n).toBe(2);
+    // Версия одного пункта устарела после правки: весь пакет откатывается, как и у закрытий.
+    const stale=tasks.execute(owner,{action:'batch',items:[
+      {action:'update',id:a.id,version:a.version,title:'Не должно примениться'},
+      {action:'update',id:b.id,version:b.version+1,title:'И это тоже'},
+    ]} as never,'stale-edit');
+    await expect(stale).rejects.toThrow(/AGENT_TASK_BATCH_REJECTED/);
+    await expect(stale).rejects.toThrow(/#1 AGENT_TASK_VERSION_CONFLICT/);
+    expect((await database().query("SELECT title FROM shared_tasks ORDER BY title")).rows.map(r=>r.title))
+      .toEqual(['Зарядить аккумулятор опеля','Отвезти матрас']);
+  });
   it('rejects the whole batch and names every failing item when one change is not allowed',async()=>{
     const own=await makeTask(owner,'Моё дело');
     const foreign=await makeTask(member,'Чужое дело');
