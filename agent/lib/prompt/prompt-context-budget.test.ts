@@ -31,7 +31,9 @@ const CORE_CHARACTER_BUDGET = 11_700;
 // Raised by 600 on 22 September 2026 for the weekly review reply section (T16, B08): which word of
 // the person becomes which action, «хватит обзоров» turns it off, and «что давит» gets one warm
 // sentence with no advice and no counting. The review itself is built by code.
-const PRIVATE_CHARACTER_BUDGET = 16_300;
+// Raised by 400 on 23 September 2026 for the life-area sentence: which words become which label,
+// that it is never added afterwards, and that a view of the same name filters by it.
+const PRIVATE_CHARACTER_BUDGET = 16_700;
 // Raised by 400 on 5 September 2026 for the memory selection criterion and slot guidance, then by
 // 300 on 6 September for the addressing section with the explicit silence directive, then by
 // 300 the same day for the pending-messages rule in that section, then by 200 on 7 September for
@@ -43,7 +45,8 @@ const PRIVATE_CHARACTER_BUDGET = 16_300;
 // the rule to record a task or stay silent when nobody addressed the agent (T03), then by 300
 // the same day for the batch and one-question rule of the planning section.
 // Raised by 500 on 22 September 2026 for the same routing sentence in the family block.
-const FAMILY_CHARACTER_BUDGET = 17_400;
+// Raised by 400 on 23 September 2026 for the same life-area sentence in the family block.
+const FAMILY_CHARACTER_BUDGET = 17_800;
 // Raised by 400 on 6 September 2026 for the addressing section with the explicit silence directive,
 // then by 2 200 on 7 September for the participants section ported from upstream v0.21.2: opinions
 // about behaviour on request, comparisons by a stated criterion, no diagnoses, no template refusal,
@@ -69,7 +72,8 @@ const EXTERNAL_WORST_CASE_CHARACTER_BUDGET = 23_700;
 // Raised by 1200 on 22 September 2026 for the partner-alert and weekly-review sections. The ceiling
 // is actually held by the external worst case, which never gets either section, so the number moves
 // for company: both live in the private block only.
-const AUTHORED_TOTAL_CHARACTER_BUDGET = 37_500;
+// Raised by 800 on 23 September 2026: the life-area sentence lives in both trusted blocks.
+const AUTHORED_TOTAL_CHARACTER_BUDGET = 38_300;
 
 describe("authored prompt context budget", () => {
   it("keeps stable and mode-scoped instructions bounded", async () => {

@@ -60,6 +60,25 @@ suite('shared task repository',()=>{
     expect((await tasks.execute(owner,{action:'get',id:task.id} as never,'read')).task).toMatchObject({originalText:{title:'Разобраться с выходными'}});
     expect((await database().query('SELECT count(*)::int AS n FROM shared_tasks')).rows[0].n).toBe(1);
   });
+  it('filters by a life area the person named, and leaves unlabelled tasks alone',async()=>{
+    // Шесть представлений из документа о балансе существовали только на бумаге: в коде был один
+    // плоский список.
+    const own=(await tasks.execute(owner,{action:'create',title:'Записаться на йогу',lifeArea:'self'} as never,'self')).task!;
+    await tasks.execute(owner,{action:'create',title:'Купить фильтры',lifeArea:'home'} as never,'home');
+    const plain=(await tasks.execute(owner,{action:'create',title:'Отвезти машину'} as never,'plain')).task!;
+
+    expect(own).toMatchObject({lifeArea:'self'});
+    expect(plain.lifeArea).toBeNull();
+    const mine=(await tasks.execute(owner,{action:'list',view:'self'} as never,'read')).tasks!;
+    expect(mine.map(t=>t.title)).toEqual(['Записаться на йогу']);
+    expect((await tasks.execute(owner,{action:'list',lifeArea:'home'} as never,'read')).tasks!.map(t=>t.title))
+      .toEqual(['Купить фильтры']);
+    // Метку можно снять и поставить заново; чужих сфер в схеме нет.
+    const cleared=(await tasks.execute(owner,{action:'update',id:own.id,version:own.version,lifeArea:null} as never,'clear')).task!;
+    expect(cleared.lifeArea).toBeNull();
+    await expect(tasks.execute(owner,{action:'create',title:'Хобби',lifeArea:'hobby'} as never,'bad'))
+      .rejects.toThrow(/AGENT_TASK_INPUT_INVALID/);
+  });
   it('projects only my assignments into my private overview with their source',async()=>{
     const privateTask=await make(owner,'Private');
     const groupTask=await make(group,'Group');

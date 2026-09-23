@@ -2,6 +2,7 @@
 import type { PoolClient } from "pg";
 import { spaceReadClause } from "./spaces/space-sql.js";
 import { AppError } from "./app-error.js";
+import { LIFE_AREAS, type LifeArea } from "./life-areas.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { CLOSED_TASK_STATUSES, UNFINISHED_TASK_STATUSES, type SharedTaskInput, type SharedTaskStatus } from "./shared-tasks.js";
 import { isCurrentTelegramMember } from "./telegram-current-membership.js";
@@ -15,6 +16,7 @@ export interface TaskRow {
   recurrence_interval: number | null;
   recurrence_unit: "daily" | "weekly" | "monthly" | "after_completion" | null;
   due_at: Date | null; due_on: string | null; kind: "task"|"idea"|"ritual"; list_name: string|null;
+  life_area: LifeArea | null;
   details: string|null; version: number; planned_from: string|null; planned_until: string|null;
   original_text?: { title: string; details: string | null };
   reminder_created:boolean; created_at: Date; telegram_chat_id: string|null; status: SharedTaskStatus; source: string; assignee: string|null;
@@ -140,7 +142,7 @@ export async function readTasks(client: PoolClient, auth: MemoryAuthorization, s
   id: string | readonly string[] | null = null, input: SharedTaskInput = {action:"list"}, timezone = "UTC") {
   // Even filtering shared records by a private plan would reveal that plan in the group.
   if (auth.groupId && (input.view === "planned" || input.from || input.until)) denied();
-  const binding=paginationFilterDigest([auth.familyId,auth.telegramUserId,auth.groupId,auth.space?.spaceId ?? null,auth.space ? String(auth.space.policyVersion) : null,scope,input.view ?? null,input.status ?? null,input.listName ?? null,input.from ?? null,input.until ?? null,input.careAreaRef ?? null]);
+  const binding=paginationFilterDigest([auth.familyId,auth.telegramUserId,auth.groupId,auth.space?.spaceId ?? null,auth.space ? String(auth.space.policyVersion) : null,scope,input.view ?? null,input.status ?? null,input.listName ?? null,input.from ?? null,input.until ?? null,input.careAreaRef ?? null,input.lifeArea ?? null]);
   const cursor = input.cursor ? decodeDateUuidCursor(input.cursor,"AGENT_TASK_CURSOR_INVALID","Не удалось продолжить список",binding) : null;
   const result = await client.query<TaskRow>(
     `SELECT t.*, t.recurrence_anchor_on::text AS recurrence_anchor_on,
@@ -169,6 +171,7 @@ export async function readTasks(client: PoolClient, auth: MemoryAuthorization, s
        AND ($5::text[] IS NULL OR t.status=ANY($5::text[]))
        AND ($3::uuid IS NULL OR TRUE) AND ($2::text IS NOT NULL)
        AND ($6::text IS NULL OR t.list_name=$6)
+       AND ($20::text IS NULL OR t.life_area=$20)
        AND ($7::text IS NULL OR t.kind=$7)
        AND ($12::boolean=false OR pplan.task_id IS NOT NULL)
        AND ($8::date IS NULL OR (pplan.planned_from <= $9 AND pplan.planned_until >= $8))
@@ -185,7 +188,9 @@ export async function readTasks(client: PoolClient, auth: MemoryAuthorization, s
       listedStatuses(id, input), input.listName ?? null,
       input.view === "ideas" ? "idea" : input.view === "rituals" ? "ritual" : ["mine","waiting","open","promised","transfers"].includes(input.view ?? "") ? "task" : null,
       input.from ?? null,input.until ?? null,cursor?.timestamp ?? null,cursor?.id ?? null,input.view === "planned",
-      input.view === "today" ? localDate(timezone) : null, timezone, input.careAreaRef ?? null, input.view === "inbox", auth.space?.spaceId ?? null, auth.space?.policyVersion ?? null, auth.userId],
+      input.view === "today" ? localDate(timezone) : null, timezone, input.careAreaRef ?? null, input.view === "inbox", auth.space?.spaceId ?? null, auth.space?.policyVersion ?? null, auth.userId,
+      // Сфера приходит либо полем, либо одноимённым видом: «покажи, что для себя» это тот же фильтр.
+      input.lifeArea ?? (LIFE_AREAS.includes(input.view as LifeArea) ? input.view as LifeArea : null)],
   );
   const page = result.rows.slice(0,100);
   const { rows, incomplete } = await keepLiveGroupRows(client, auth, page);
@@ -229,7 +234,7 @@ export async function keepLiveGroupRows<Row extends { group_id: string | null }>
 export function present(row: TaskRow, personalPlan=true) {
   return { id: row.id, title: row.title, status: row.status, dueAt: row.due_at?.toISOString() ?? null,
     source: row.source, assignee: row.kind === "task" ? row.assignee : null, curator:row.kind !== "task" ? row.assignee : null, scope: row.scope, reminderCreated: personalPlan ? row.reminder_created : null,
-    kind:row.kind, listName:row.list_name, details:row.details, dueOn:row.due_on,version:row.version,
+    kind:row.kind, listName:row.list_name, lifeArea:row.life_area, details:row.details, dueOn:row.due_on,version:row.version,
     originalText:row.original_text ?? {title:row.title,details:row.details},
     pendingAssignee:row.pending_assignee,
     careAreaRef:row.care_area_id ?? null,
@@ -248,7 +253,7 @@ export function presentSummary(row: TaskRow, personalPlan=true) {
   const full = present(row, personalPlan);
   return { id: full.id, title: full.title, status: full.status, kind: full.kind, dueAt: full.dueAt,
     dueOn: full.dueOn, source: full.source, assignee: full.assignee, curator: full.curator,
-    listName: full.listName, version: full.version, repeat: full.repeat,
+    listName: full.listName, lifeArea: full.lifeArea, version: full.version, repeat: full.repeat,
     pendingAssignee: full.pendingAssignee, reminderCreated: full.reminderCreated,
     plannedFrom: full.plannedFrom, plannedUntil: full.plannedUntil };
 }

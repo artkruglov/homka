@@ -1,5 +1,7 @@
 /** Shared-task input and state transitions. Identity is resolved by the repository. */
 import { z } from "zod";
+
+import { LIFE_AREAS } from "./life-areas.js";
 import { AppError } from "./app-error.js";
 
 const date = z.iso.date().refine(value => {
@@ -29,12 +31,14 @@ const sharedTaskFields = z.object({
   dueOn: date.nullable().optional(),
   kind: z.enum(["task","idea","ritual"]).optional(),
   listName: z.string().trim().min(1).max(100).nullable().optional(),
+  lifeArea: z.enum(LIFE_AREAS).nullable().optional(),
   details: z.string().trim().max(4000).nullable().optional(),
   version: z.number().int().positive().optional(),
   plannedFrom: date.optional(), plannedUntil: date.optional(),
   from: date.optional(), until: date.optional(),
   occurredOn: date.optional(), note: z.string().trim().min(1).max(1000).optional(),
-  view: z.enum(["mine","promised","waiting","open","today","transfers","ideas","rituals","planned","inbox","done"]).optional(),
+  view: z.enum(["mine","promised","waiting","open","today","transfers","ideas","rituals","planned","inbox","done",
+    ...LIFE_AREAS]).optional(),
   careAreaRef: z.uuid().optional(),
   cursor: z.string().max(300).optional(),
   id: z.uuid().optional(),
@@ -45,10 +49,10 @@ type SharedTaskFields = z.infer<typeof sharedTaskFields> & { items?: unknown[] }
 function checkSharedTaskFields(v: SharedTaskFields, ctx: z.RefinementCtx) {
   const fields: Record<string,string[]> = {
     batch:["items"],
-    create:["title","assigneeRef","unassigned","dueAt","dueOn","kind","listName","details","repeat","careAreaRef"],
-    update:["id","version","title","dueAt","dueOn","listName","details"],
-    clarify:["id","version","title","dueAt","dueOn","listName","details"],
-    list:["status","view","listName","from","until","cursor","careAreaRef"], lists:[], get:["id"],
+    create:["title","assigneeRef","unassigned","dueAt","dueOn","kind","listName","lifeArea","details","repeat","careAreaRef"],
+    update:["id","version","title","dueAt","dueOn","listName","lifeArea","details"],
+    clarify:["id","version","title","dueAt","dueOn","listName","lifeArea","details"],
+    list:["status","view","listName","lifeArea","from","until","cursor","careAreaRef"], lists:[], get:["id"],
     plan:["id","plannedFrom","plannedUntil"], unplan:["id"], activate:["id","version"],
     record:["id","occurredOn","note"], history:["id"], participants:[],
     // version необязателен: модель передаёт прочитанную в list, и тогда устаревшее изменение отвергается.
@@ -62,7 +66,7 @@ function checkSharedTaskFields(v: SharedTaskFields, ctx: z.RefinementCtx) {
   if (v.action === "create" && !v.title || !["participants","list","lists","create","batch"].includes(v.action) && !v.id) fail("Нужны title для create или id для изменения записи");
   if (["update","clarify","activate","transfer","release"].includes(v.action) && !v.version) fail("Прочитайте актуальную version через list");
   if (v.action === "transfer" && !v.assigneeRef) fail("Для transfer укажите assigneeRef из participants");
-  if (v.action === "update" && !["title","details","dueAt","dueOn","listName"].some(k => k in v)) fail("Укажите изменения");
+  if (v.action === "update" && !["title","details","dueAt","dueOn","listName","lifeArea"].some(k => k in v)) fail("Укажите изменения");
   if (v.dueAt && v.dueOn) fail("Срок бывает датой либо точным временем");
   if (v.unassigned && (v.assigneeRef || (v.kind && v.kind !== "task"))) {
     fail("Свободным бывает только дело и только без указанного исполнителя");

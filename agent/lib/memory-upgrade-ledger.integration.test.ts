@@ -184,6 +184,7 @@ const POST_V0101_MIGRATIONS = [
   "151_partner_alert_claim.sql",
   "152_weekly_review.sql",
   "153_weekly_review_claim.sql",
+  "154_life_area.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [
