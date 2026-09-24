@@ -5,6 +5,7 @@
  * - A dedicated PostgreSQL advisory lock serializes physical Workflow graph deletion.
  * - A concurrent invocation exits without claiming a second application session.
  * - Destroying the lock connection releases the session-level lock after the sweep.
+ * - Turn runs left by sessions deleted before the fix are swept under the same lock.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +27,7 @@ const values = vi.hoisted(() => {
     claimExpiredForDeletion: vi.fn(),
     completeDeletion: vi.fn(),
     connect: vi.fn(async () => ({ query: lockQuery, release: lockRelease })),
+    deleteOrphanedRuns: vi.fn(async () => 0),
     deletePostgresEveSession: vi.fn(async () => deletionPromise),
     failDeletion: vi.fn(),
     lockQuery,
@@ -39,6 +41,7 @@ vi.mock("../database.js", () => ({
   database: () => ({ connect: values.connect }),
 }));
 vi.mock("./workflow-postgres-session-storage.js", () => ({
+  deleteConfiguredOrphanedPostgresEveRuns: values.deleteOrphanedRuns,
   deleteConfiguredPostgresEveSession: values.deletePostgresEveSession,
 }));
 vi.mock("./session-repository.js", () => ({
