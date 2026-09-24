@@ -36,7 +36,9 @@ const CORE_CHARACTER_BUDGET = 12_900;
 // sentence with no advice and no counting. The review itself is built by code.
 // Raised by 400 on 23 September 2026 for the life-area sentence: which words become which label,
 // that it is never added afterwards, and that a view of the same name filters by it.
-const PRIVATE_CHARACTER_BUDGET = 16_700;
+// Raised by 300 on 24 September 2026: a request to show tasks always calls list again; the model
+// answered "список тот же, что утром" and retyped the morning board with its stale numbers.
+const PRIVATE_CHARACTER_BUDGET = 17_000;
 // Raised by 400 on 5 September 2026 for the memory selection criterion and slot guidance, then by
 // 300 on 6 September for the addressing section with the explicit silence directive, then by
 // 300 the same day for the pending-messages rule in that section, then by 200 on 7 September for
@@ -49,7 +51,8 @@ const PRIVATE_CHARACTER_BUDGET = 16_700;
 // the same day for the batch and one-question rule of the planning section.
 // Raised by 500 on 22 September 2026 for the same routing sentence in the family block.
 // Raised by 400 on 23 September 2026 for the same life-area sentence in the family block.
-const FAMILY_CHARACTER_BUDGET = 17_800;
+// Raised by 300 on 24 September 2026 for the same always-read-the-registry rule.
+const FAMILY_CHARACTER_BUDGET = 18_100;
 // Raised by 400 on 6 September 2026 for the addressing section with the explicit silence directive,
 // then by 2 200 on 7 September for the participants section ported from upstream v0.21.2: opinions
 // about behaviour on request, comparisons by a stated criterion, no diagnoses, no template refusal,
