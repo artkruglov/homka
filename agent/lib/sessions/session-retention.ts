@@ -7,7 +7,10 @@
 import { isAppError } from "../app-error.js";
 import { database } from "../database.js";
 import { sessionRepository } from "./session-repository.js";
-import { deleteConfiguredPostgresEveSession } from "./workflow-postgres-session-storage.js";
+import {
+  deleteConfiguredOrphanedPostgresEveRuns,
+  deleteConfiguredPostgresEveSession,
+} from "./workflow-postgres-session-storage.js";
 
 const SESSION_RETENTION_ADVISORY_LOCK_KEY = "osinara-eve-session-retention";
 
@@ -34,6 +37,11 @@ export async function deleteExpiredSessions(): Promise<number> {
 async function deleteExpiredSessionsUnderLock(): Promise<number> {
   // The existing minute lifecycle hook bounds abandoned task rows before physical Eve deletion.
   await sessionRepository.retireAbandonedTasks(new Date());
+  // Ходы сессий, удалённых до того, как удаление стало забирать их с собой, звать больше некому.
+  const orphans = await deleteConfiguredOrphanedPostgresEveRuns();
+  if (orphans > 0) {
+    console.error(JSON.stringify({ code: "AGENT_EVE_ORPHAN_RUNS_DELETED", runs: orphans }));
+  }
   let deleted = 0;
   while (true) {
     const claim = await sessionRepository.claimExpiredForDeletion(new Date());
