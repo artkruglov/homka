@@ -28,8 +28,10 @@ describe("manage_shared_tasks list board", () => {
 
     expect(result.tasks).toHaveLength(2);
     expect(result.board).toContain("<telegram-keep-open>");
-    expect(result.board).toContain("**Дом · 1**\n• Отвезти машину");
-    expect(result.board).toContain("**Работа · 1**\n• Написать подрядчику");
+    // Ответ модели рисуется как Rich Markdown: пункт обязан быть пунктом списка, иначе секция
+    // склеится в один абзац.
+    expect(result.board).toContain("**Дом · 1**\n\n- Отвезти машину");
+    expect(result.board).toContain("**Работа · 1**\n\n- Написать подрядчику");
   });
 
   it("adds no board to someone else's commitments", async () => {
