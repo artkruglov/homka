@@ -6,6 +6,7 @@
  * - `TelegramAuthoredParts`: main answer plus the authored asides.
  * - `splitTelegramAuthoredParts`: applies the paced-message ceiling and nothing else.
  * - `stripTelegramAsideDirectives`: durable projection text without transport directives.
+ * - `TELEGRAM_KEEP_OPEN_DIRECTIVE`, `takeTelegramKeepOpen`: a code-rendered board is shown in full.
  *
  * Key construct:
  * - Where an answer breaks and how each part reads is the author's decision. The ceiling below
@@ -17,6 +18,33 @@
  *   reached people as visible text. Closing and self-closing spellings, and the plain `[[split]]`
  *   marker upstream switched to, are the same directive for the transport.
  */
+export const TELEGRAM_KEEP_OPEN_DIRECTIVE = "<telegram-keep-open>";
+
+/**
+ * Директива признаётся отдельной строкой в любом месте части, а не только первой: 24 сентября
+ * 2026 модель предварила доску фразой «Вот твои дела», и доска целиком ушла под кат. Требование
+ * «отдельной строкой» остаётся: процитированное в предложении название дела кат не отменяет.
+ * Разбор идёт построчно с учётом ограждённого кода, где директива остаётся содержимым примера.
+ */
+const KEEP_OPEN_LINE_PATTERN = /^[ \t]*<telegram-keep-open>[ \t]*\r?$/u;
+const CODE_FENCE_PATTERN = /^\s*```/u;
+
+/** Снимает директиву вне кода и говорит, была ли она там вообще. */
+export function takeTelegramKeepOpen(part: string): { kept: boolean; text: string } {
+  let kept = false;
+  let fenced = false;
+  const lines: string[] = [];
+  for (const line of part.split("\n")) {
+    if (CODE_FENCE_PATTERN.test(line)) fenced = !fenced;
+    if (!fenced && KEEP_OPEN_LINE_PATTERN.test(line)) {
+      kept = true;
+      continue;
+    }
+    lines.push(line);
+  }
+  return kept ? { kept, text: lines.join("\n").trim() } : { kept, text: part };
+}
+
 const TELEGRAM_AUTHORED_MESSAGE_MAX_COUNT = 5;
 
 export const TELEGRAM_ASIDE_DIRECTIVE = "<telegram-split>";
@@ -102,6 +130,6 @@ export function splitTelegramAuthoredParts(markdown: string): TelegramAuthoredPa
 export function stripTelegramAsideDirectives(markdown: string): string {
   // Транспортные директивы не попадают в durable-проекцию: журнал хранит то, что прочитал человек.
   return authoredParts(markdown)
-    .map((part) => part.replace(/^[ \t]*<telegram-keep-open>[ \t]*\r?\n?/u, ""))
+    .map((part) => takeTelegramKeepOpen(part).text)
     .join("\n\n");
 }

@@ -251,7 +251,30 @@ describe("keep-open directive", () => {
       .map((chunk) => chunk.text).join("\n")).not.toContain("Полный ответ");
   });
 
+  it("still opens when the model writes a lead line before the board", () => {
+    // Прод 24 сентября 2026: модель предварила доску фразой «Вот твои дела», директива перестала
+    // быть первой строкой, и доска целиком ушла под «Полный ответ».
+    const answer = `Вот твои дела.\n\n<telegram-keep-open>\n${"строка. ".repeat(120)}`;
+
+    const delivered = formatTelegramFinalPresentation(answer).map((chunk) => chunk.text).join("\n");
+
+    expect(delivered).not.toContain("Полный ответ");
+    expect(delivered).not.toContain("telegram-keep-open");
+    expect(delivered).toContain("Вот твои дела.");
+  });
+
+  it("keeps the directive inert inside code, where it is content", () => {
+    const answer = `Пример разметки:\n\n\`\`\`text\n<telegram-keep-open>\n\`\`\`\n\n${"строка. ".repeat(120)}`;
+
+    const delivered = formatTelegramFinalPresentation(answer).map((chunk) => chunk.text).join("\n");
+
+    expect(delivered).toContain("Полный ответ");
+    expect(delivered).toContain("<telegram-keep-open>");
+  });
+
   it("never stores the directive in the durable projection", () => {
     expect(stripTelegramAsideDirectives("<telegram-keep-open>\nДоска")).toBe("Доска");
+    expect(stripTelegramAsideDirectives("Вот твои дела.\n\n<telegram-keep-open>\nДоска"))
+      .toBe("Вот твои дела.\n\nДоска");
   });
 });
