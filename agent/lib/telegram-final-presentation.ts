@@ -18,7 +18,7 @@ import {
   formatTelegramRichMessages,
   hasTelegramRichDetailsBlock,
 } from "./telegram-rich-markdown.js";
-import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
+import { splitTelegramAuthoredParts, takeTelegramKeepOpen } from "./telegram-authored-split.js";
 
 export type TelegramChunkPacing = "aside" | "immediate";
 
@@ -44,8 +44,7 @@ const LONG_ANSWER_SUMMARY = "Полный ответ";
  * перед глазами, а длина доски это число дел, а не многословие. Директиву ставит код
  * (`task-board.ts`), модель пересылает доску как есть; до человека маркер не доходит.
  */
-export const TELEGRAM_KEEP_OPEN_DIRECTIVE = "<telegram-keep-open>";
-const TELEGRAM_KEEP_OPEN_PATTERN = /^[ \t]*<telegram-keep-open>[ \t]*\r?\n?/u;
+export { TELEGRAM_KEEP_OPEN_DIRECTIVE } from "./telegram-authored-split.js";
 
 function usesSupportedRichBlockFormatting(markdown: string): boolean {
   return RICH_BLOCK_PATTERN.test(markdown) || GFM_TABLE_DELIMITER_PATTERN.test(markdown);
@@ -138,9 +137,10 @@ export function formatTelegramFinalPresentation(
   // collapses without swallowing the asides its author separated from it.
   // Директива действует только отдельной первой строкой части: иначе процитированное название
   // дела с этим текстом отменяло бы кат всему сообщению.
-  const present = (part: string) => TELEGRAM_KEEP_OPEN_PATTERN.test(part)
-    ? part.replace(TELEGRAM_KEEP_OPEN_PATTERN, "").trim()
-    : collapseLongAnswer(part);
+  const present = (part: string) => {
+    const { kept, text } = takeTelegramKeepOpen(part);
+    return kept ? text : collapseLongAnswer(part);
+  };
   return [
     ...formatPart(present(main), "immediate"),
     ...asides.flatMap((aside) => formatPart(present(aside), "aside")),
